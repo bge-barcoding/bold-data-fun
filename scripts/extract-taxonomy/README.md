@@ -19,11 +19,6 @@ python extract_taxonomy.py plate_id1 plate_id2 plate_id3 ...
 python extract_taxonomy.py BGE_00688 BGE_00647 --base-dir "path\to\base-directory" --output my_results.tsv
 ```
 
-### Using the Example Script
-```bash
-python run_extraction.py
-```
-
 ## Command Line Arguments
 
 - `plate_ids` (required): One or more plate IDs to extract
