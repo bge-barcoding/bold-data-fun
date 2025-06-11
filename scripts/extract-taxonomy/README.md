@@ -5,8 +5,7 @@ This package contains scripts to extract taxonomy information from BOLD project 
 ## Files
 
 1. **extract_taxonomy.py** - Main extraction script
-2. **run_extraction.py** - Example script with predefined plate IDs
-3. **README.md** - This documentation file
+2. **README.md** - This documentation file
 
 ## Usage
 
@@ -17,7 +16,7 @@ python extract_taxonomy.py plate_id1 plate_id2 plate_id3 ...
 
 ### With Options
 ```bash
-python extract_taxonomy.py BGE_00688 BGE_00647 --base-dir "C:\_claude_files\projects\bold-extract-taxonomy" --output my_results.tsv
+python extract_taxonomy.py BGE_00688 BGE_00647 --base-dir "path\to\base-directory" --output my_results.tsv
 ```
 
 ### Using the Example Script
