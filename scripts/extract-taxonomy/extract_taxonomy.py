@@ -38,13 +38,14 @@ def load_and_process_files(merged_file, taxonomy_file, lab_file):
         # Try UTF-8 first, then fallback to latin-1 if needed
         try:
             # Skip the first row if it contains "Machine readable" for merged_custom_fields
-            merged_df = pd.read_csv(merged_file, sep='\t', encoding='utf-8', skiprows=1)
-            taxonomy_df = pd.read_csv(taxonomy_file, sep='\t', encoding='utf-8')
-            lab_df = pd.read_csv(lab_file, sep='\t', encoding='utf-8')
+            # Add low_memory=False to suppress dtype warnings
+            merged_df = pd.read_csv(merged_file, sep='\t', encoding='utf-8', skiprows=1, low_memory=False)
+            taxonomy_df = pd.read_csv(taxonomy_file, sep='\t', encoding='utf-8', low_memory=False)
+            lab_df = pd.read_csv(lab_file, sep='\t', encoding='utf-8', low_memory=False)
         except UnicodeDecodeError:
-            merged_df = pd.read_csv(merged_file, sep='\t', encoding='latin-1', skiprows=1)
-            taxonomy_df = pd.read_csv(taxonomy_file, sep='\t', encoding='latin-1')
-            lab_df = pd.read_csv(lab_file, sep='\t', encoding='latin-1')
+            merged_df = pd.read_csv(merged_file, sep='\t', encoding='latin-1', skiprows=1, low_memory=False)
+            taxonomy_df = pd.read_csv(taxonomy_file, sep='\t', encoding='latin-1', low_memory=False)
+            lab_df = pd.read_csv(lab_file, sep='\t', encoding='latin-1', low_memory=False)
         
         return merged_df, taxonomy_df, lab_df
     except Exception as e:
@@ -57,20 +58,47 @@ def create_plate_well_id(plate_id, well_position):
     return f"{plate_id}_{well_position}"
 
 
+def extract_plate_id_from_sample_id(sample_id):
+    """Extract plate ID from sample ID format like BGE_00841_A1 -> BGE_00841"""
+    if pd.isna(sample_id) or sample_id == '':
+        return None
+    
+    # Split by underscore and take first two parts for BGE format
+    parts = str(sample_id).split('_')
+    if len(parts) >= 2 and parts[0] == 'BGE':
+        return f"{parts[0]}_{parts[1]}"
+    return None
+
+
 def match_records(merged_df, taxonomy_df, lab_df, target_plate_ids):
     """Match records between merged_custom_fields, taxonomy, and lab files based on linking criteria."""
     results = []
     
-    # Filter merged_df for target plate IDs
-    target_merged = merged_df[merged_df['Plate ID'].isin(target_plate_ids)].copy()
+    # Handle two different data formats:
+    # Format 1: Plate ID column is populated (original format)
+    # Format 2: Plate ID column is empty, but SampleID contains full identifier like BGE_00841_A1
+    
+    # Check if Plate ID column exists and has non-empty values
+    if 'Plate ID' in merged_df.columns and not merged_df['Plate ID'].isna().all():
+        # Format 1: Use Plate ID column
+        target_merged = merged_df[merged_df['Plate ID'].isin(target_plate_ids)].copy()
+        
+        if not target_merged.empty:
+            # Create Plate_Well column for matching
+            target_merged['Plate_Well'] = target_merged.apply(
+                lambda row: create_plate_well_id(row['Plate ID'], row['Well Position']), axis=1
+            )
+    else:
+        # Format 2: Extract plate ID from SampleID
+        merged_df['Extracted_Plate_ID'] = merged_df['SampleID'].apply(extract_plate_id_from_sample_id)
+        target_merged = merged_df[merged_df['Extracted_Plate_ID'].isin(target_plate_ids)].copy()
+        
+        if not target_merged.empty:
+            # For this format, SampleID is already in the Plate_Well format (e.g., BGE_00841_A1)
+            target_merged['Plate_Well'] = target_merged['SampleID']
     
     if target_merged.empty:
         return results
-    
-    # Create Plate_Well column for matching
-    target_merged['Plate_Well'] = target_merged.apply(
-        lambda row: create_plate_well_id(row['Plate ID'], row['Well Position']), axis=1
-    )
     
     for _, merged_row in target_merged.iterrows():
         sample_id = merged_row['SampleID']
