@@ -13,7 +13,7 @@ from collections import defaultdict
 import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
 
-def load_and_process_data(csv_file, sample_id_col, level_cols):
+def load_and_process_data(csv_file, sample_id_col, level_cols, count_unique=False):
     """
     Load CSV and process hierarchical data for up to 5 levels
     """
@@ -37,7 +37,7 @@ def load_and_process_data(csv_file, sample_id_col, level_cols):
         # Build hierarchical structure dynamically
         def build_nested_dict(depth):
             if depth == 0:
-                return int
+                return set if count_unique else int
             return lambda: defaultdict(build_nested_dict(depth - 1))
         
         hierarchy = defaultdict(build_nested_dict(len(active_levels) - 1))
@@ -47,11 +47,29 @@ def load_and_process_data(csv_file, sample_id_col, level_cols):
             for i, level_col in enumerate(active_levels):
                 key = str(row[level_col]).strip()
                 if i == len(active_levels) - 1:
-                    current_level[key] += 1
+                    if count_unique:
+                        current_level[key].add(str(row[sample_id_col]).strip())
+                    else:
+                        current_level[key] += 1
                 else:
                     current_level = current_level[key]
         
-        return hierarchy, len(df_clean), active_levels
+        # Convert sets to counts if using count_unique
+        if count_unique:
+            def convert_sets_to_counts(obj):
+                if isinstance(obj, set):
+                    return len(obj)
+                elif isinstance(obj, defaultdict):
+                    return defaultdict(int, {k: convert_sets_to_counts(v) for k, v in obj.items()})
+                return obj
+            
+            hierarchy = convert_sets_to_counts(hierarchy)
+            # Calculate total unique values
+            total_count = sum(calculate_total_recursive(v) for v in hierarchy.values())
+        else:
+            total_count = len(df_clean)
+        
+        return hierarchy, total_count, active_levels
         
     except Exception as e:
         print(f"Error processing data: {e}")
@@ -112,7 +130,7 @@ def calculate_total_recursive(data):
 
 def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='sunburst_chart.png', 
                          title='Data Sunburst Analysis', figsize=(18, 18), auto_formats=True,
-                         color_inherit_level=1, color_mode='variations'):
+                         color_inherit_level=1, color_mode='variations', count_unique=False):
     """
     Create a sunburst chart with hierarchical segments for up to 5 levels
     
@@ -279,7 +297,8 @@ def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='
     center_circle = plt.Circle((0, 0), center_radius, fc='white', ec='black', linewidth=3)
     ax.add_patch(center_circle)
     
-    ax.text(0, 0, f'Total\nSamples\n{total_samples:,}', 
+    count_label = 'Unique\nValues' if count_unique else 'Total\nSamples'
+    ax.text(0, 0, f'{count_label}\n{total_samples:,}', 
             horizontalalignment='center', verticalalignment='center',
             fontsize=14, weight='bold', color='black')
     
@@ -335,7 +354,8 @@ def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='
     
     # Display summary statistics
     print(f"\nSummary Statistics:")
-    print(f"Total samples: {total_samples:,}")
+    count_type = "unique values" if count_unique else "samples"
+    print(f"Total {count_type}: {total_samples:,}")
     print(f"Number of levels: {n_levels}")
     print(f"Color inheritance from level: {color_inherit_level}")
     print(f"Color mode: {color_mode}")
@@ -345,7 +365,7 @@ def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='
     
     for key, total in level1_sorted:
         percentage = (total / total_samples) * 100
-        print(f"  {key}: {total:,} samples ({percentage:.1f}%)")
+        print(f"  {key}: {total:,} {count_type} ({percentage:.1f}%)")
 
 def main():
     parser = argparse.ArgumentParser(description='Generate sunburst chart from CSV data (up to 5 levels)')
@@ -363,6 +383,8 @@ def main():
     parser.add_argument('--color-mode', choices=['variations', 'same'], default='variations',
                        help='Color inheritance mode: "variations" creates color shades for deeper levels, ' +
                             '"same" uses identical colors for all inherited levels (default: variations)')
+    parser.add_argument('--count-unique', action='store_true', 
+                       help='Count unique values in sample-id column instead of all records (default: False)')
     parser.add_argument('--output', default='sunburst_chart.png', 
                        help='Output filename with extension (default: sunburst_chart.png)\n' +
                             'Supported formats: PNG, JPG, PDF, SVG, EPS, TIFF\n' +
@@ -385,7 +407,7 @@ def main():
     
     # Load and process data
     hierarchy, total_samples, active_levels = load_and_process_data(
-        args.csv_file, args.sample_id, level_cols
+        args.csv_file, args.sample_id, level_cols, args.count_unique
     )
     
     # Create the chart
@@ -396,7 +418,8 @@ def main():
         figsize=(args.width, args.height),
         auto_formats=not args.no_auto_formats,
         color_inherit_level=args.color_inherit_level,
-        color_mode=args.color_mode
+        color_mode=args.color_mode,
+        count_unique=args.count_unique
     )
 
 if __name__ == "__main__":
@@ -409,6 +432,8 @@ if __name__ == "__main__":
         print("python sunburst_chart_script.py data.csv --level4 Category4 --level5 Category5")
         print("python sunburst_chart_script.py data.csv --color-inherit-level 2")
         print("python sunburst_chart_script.py data.csv --color-inherit-level 1 --color-mode same")
+        print("python sunburst_chart_script.py data.csv --count-unique")
+        print("python sunburst_chart_script.py data.csv --sample-id Species --count-unique")
         print("\nSupported formats: PNG, JPG, PDF, SVG, EPS, TIFF")
         print("Note: SVG and PDF versions are automatically created for editing")
         print("\nColor inheritance examples:")

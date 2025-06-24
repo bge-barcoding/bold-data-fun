@@ -29,6 +29,7 @@ A powerful Python script that creates hierarchical sunburst charts from CSV data
 - **Missing Data Handling**: Robust handling of incomplete records
 - **Large Dataset Support**: Efficiently processes thousands of records
 - **Flexible Column Mapping**: Customizable column names for any CSV structure
+- **Dual Counting Modes**: Count all records or unique values in specified column
 
 ## Installation
 
@@ -61,6 +62,18 @@ python sunburst_chart_script.py data.csv \
   --level3 "Item"
 ```
 
+### Count Unique Values
+```bash
+# Count all records (default behavior)
+python sunburst_chart_script.py data.csv
+
+# Count unique values in Sample-ID column
+python sunburst_chart_script.py data.csv --count-unique
+
+# Count unique species (useful for biodiversity analysis)
+python sunburst_chart_script.py data.csv --sample-id "Species" --count-unique
+```
+
 ### Color Inheritance
 ```bash
 # Default: Level 1 inheritance with color variations (progressive shading)
@@ -91,6 +104,7 @@ python sunburst_chart_script.py data.csv \
 |--------|---------|-------------|
 | `csv_file` | - | **Required**: Path to input CSV file |
 | `--sample-id` | `Sample-ID` | Column name for counting samples |
+| `--count-unique` | `False` | Count unique values in sample-id column instead of all records |
 | `--level1` | `Partner_sub` | First hierarchy level (innermost ring) |
 | `--level2` | `partner` | Second hierarchy level |
 | `--level3` | `Project-Code` | Third hierarchy level |
@@ -167,6 +181,17 @@ python sunburst_chart_script.py museum_data.csv \
   --title "Museum Collections Analysis"
 ```
 
+### Species Diversity Analysis
+```bash
+python sunburst_chart_script.py biodiversity_data.csv \
+  --level1 "Kingdom" \
+  --level2 "Phylum" \
+  --level3 "Class" \
+  --sample-id "Species" \
+  --count-unique \
+  --title "Species Diversity by Taxonomy"
+```
+
 ### Extended 5-Level Analysis
 ```bash
 python sunburst_chart_script.py biodiversity_data.csv \
@@ -229,6 +254,53 @@ When you run the script, you typically get:
 - **Black Text Labels**: All segments labeled with name and count in crisp black text
 - **Professional Typography**: Optimized fonts and sizing
 - **Clean Borders**: White borders separate all segments
+
+## Counting Modes
+
+The script supports two counting modes that determine how data is aggregated in each segment:
+
+### Record Counting (Default: `--count-unique` not specified)
+- **Behavior**: Counts every row/record in the dataset
+- **Use Case**: Shows sampling effort, total specimens, or processing volume
+- **Example**: If you have 5 specimens of the same species, it counts as 5
+
+### Unique Value Counting (`--count-unique`)
+- **Behavior**: Counts unique values in the specified `--sample-id` column
+- **Use Case**: Shows diversity, distinct items, or unique occurrences
+- **Example**: If you have 5 specimens of the same species, it counts as 1
+
+### Practical Examples
+
+#### Biodiversity Analysis
+```bash
+# Count total specimens per family
+python sunburst_chart_script.py biodiversity.csv \
+  --level1 "Class" --level2 "Order" --level3 "Family"
+
+# Count unique species per family  
+python sunburst_chart_script.py biodiversity.csv \
+  --level1 "Class" --level2 "Order" --level3 "Family" \
+  --sample-id "Species" --count-unique
+```
+
+#### Sample Processing Analysis
+```bash
+# Count total processing attempts
+python sunburst_chart_script.py lab_data.csv
+
+# Count unique samples processed
+python sunburst_chart_script.py lab_data.csv --count-unique
+```
+
+### When to Use Each Mode
+
+| Analysis Goal | Counting Mode | Why |
+|---------------|---------------|-----|
+| **Sampling effort** | Record counting | Shows total work/specimens collected |
+| **Species diversity** | Unique counting with `--sample-id "Species"` | Shows biodiversity richness |
+| **Geographic coverage** | Unique counting with `--sample-id "Location"` | Shows distinct locations sampled |
+| **Processing volume** | Record counting | Shows total laboratory throughput |
+| **Sample coverage** | Unique counting | Shows distinct samples processed |
 
 ## Color Inheritance System
 
