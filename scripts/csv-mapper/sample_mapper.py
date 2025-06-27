@@ -188,6 +188,83 @@ def check_label_overlap(new_x, new_y, existing_positions, min_distance=1.5):
             return True
     return False
 
+def get_label_position_overrides():
+    """Manual position overrides for countries with problematic label placement."""
+    return {
+        # Country name should match the NAME field in the shapefile
+        'France': (2.5, 46.5),  # Mainland France, not overseas territories
+        'Norway': (10.0, 62.0),  # Central Norway mainland
+        'Russia': (40.0, 60.0),  # European Russia, not Siberia
+        'United States of America': (-98.0, 39.5),  # Continental US center
+        'United Kingdom': (-2.0, 54.0),  # Great Britain center
+        'Denmark': (10.0, 56.0),  # Jutland peninsula, not Greenland
+        'Netherlands': (5.2, 52.2),  # Mainland Netherlands
+        'China': (105.0, 35.0),  # Central China
+        'Australia': (135.0, -25.0),  # Central Australia
+        'Canada': (-100.0, 60.0),  # Central Canada
+        'Chile': (-71.0, -30.0),  # Central Chile
+        'Brazil': (-55.0, -10.0),  # Central Brazil
+        'Argentina': (-64.0, -34.0),  # Central Argentina
+        'Finland': (26.0, 64.0),  # Central Finland
+        'Sweden': (15.0, 62.0),  # Central Sweden
+        'Turkey': (35.0, 39.0),  # Central Turkey
+        'Italy': (12.5, 42.0),  # Central Italy
+        'Spain': (-4.0, 40.0),  # Central Spain
+        'Portugal': (-8.0, 39.5),  # Central Portugal
+        'Greece': (22.0, 39.0),  # Central Greece mainland
+    }
+
+def get_optimal_label_position(row, bounds):
+    """Get the optimal label position using hybrid approach."""
+    
+    # Get manual overrides
+    overrides = get_label_position_overrides()
+    
+    # Check for manual override first
+    for name_col in ['NAME', 'NAME_LONG', 'NAME_EN', 'ADMIN']:
+        if name_col in row.index and row[name_col] in overrides:
+            override_x, override_y = overrides[row[name_col]]
+            # Verify override position is within map bounds
+            if (bounds['min_lon'] <= override_x <= bounds['max_lon'] and 
+                bounds['min_lat'] <= override_y <= bounds['max_lat']):
+                return override_x, override_y
+    
+    try:
+        # Method 1: Try representative point (guaranteed to be inside geometry)
+        rep_point = row.geometry.representative_point()
+        rep_x, rep_y = rep_point.x, rep_point.y
+        
+        # Check if representative point is within bounds
+        if (bounds['min_lon'] <= rep_x <= bounds['max_lon'] and 
+            bounds['min_lat'] <= rep_y <= bounds['max_lat']):
+            return rep_x, rep_y
+            
+    except Exception:
+        pass
+    
+    try:
+        # Method 2: Fallback to largest polygon centroid
+        if hasattr(row.geometry, 'geoms'):
+            # MultiPolygon - find largest polygon
+            largest_poly = max(row.geometry.geoms, key=lambda x: x.area)
+            centroid = largest_poly.centroid
+        else:
+            # Single Polygon
+            centroid = row.geometry.centroid
+            
+        cent_x, cent_y = centroid.x, centroid.y
+        
+        # Check if centroid is within bounds
+        if (bounds['min_lon'] <= cent_x <= bounds['max_lon'] and 
+            bounds['min_lat'] <= cent_y <= bounds['max_lat']):
+            return cent_x, cent_y
+            
+    except Exception:
+        pass
+    
+    # If all methods fail, return None
+    return None
+
 def create_country_mapping():
     """Create mapping between data country names and Natural Earth country names."""
     return {
@@ -474,32 +551,27 @@ def create_choropleth_map(country_counts, shapefile_path, output_dir, title, bor
     countries_with_data = countries_with_data.sort_values('sample_count', ascending=False)
     
     for idx, row in countries_with_data.iterrows():
-        try:
-            centroid = row.geometry.centroid
-            centroid_x = centroid.x
-            centroid_y = centroid.y
+        # Get optimal label position using hybrid approach
+        position = get_optimal_label_position(row, bounds)
+        
+        if position is not None:
+            label_x, label_y = position
             
-            # Only add label if centroid is within bounds
-            if (bounds['min_lon'] <= centroid_x <= bounds['max_lon'] and 
-                bounds['min_lat'] <= centroid_y <= bounds['max_lat']):
+            # Check for overlap with existing labels
+            if not check_label_overlap(label_x, label_y, label_positions):
+                ax.annotate(f"{int(row['sample_count']):,}",
+                           xy=(label_x, label_y),
+                           ha='center', va='center',
+                           fontsize=10,  # Smaller font size
+                           fontweight='bold',
+                           bbox=dict(boxstyle='round,pad=0.2',  # Smaller padding
+                                   facecolor='white', 
+                                   alpha=0.9,
+                                   edgecolor='black',
+                                   linewidth=0.3))  # Thinner border
                 
-                # Check for overlap with existing labels
-                if not check_label_overlap(centroid_x, centroid_y, label_positions):
-                    ax.annotate(f"{int(row['sample_count']):,}",
-                               xy=(centroid_x, centroid_y),
-                               ha='center', va='center',
-                               fontsize=10,  # Smaller font size
-                               fontweight='bold',
-                               bbox=dict(boxstyle='round,pad=0.2',  # Smaller padding
-                                       facecolor='white', 
-                                       alpha=0.9,
-                                       edgecolor='black',
-                                       linewidth=0.3))  # Thinner border
-                    
-                    # Record this position
-                    label_positions.append((centroid_x, centroid_y))
-        except:
-            continue  # Skip if centroid calculation fails
+                # Record this position
+                label_positions.append((label_x, label_y))
     
     plt.tight_layout()
     
