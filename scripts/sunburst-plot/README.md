@@ -1,6 +1,6 @@
 # Sunburst Chart Generator
 
-A powerful Python script that creates hierarchical sunburst charts from CSV data, supporting up to 5 levels of hierarchy with excellent color discrimination and professional formatting.
+A powerful Python script that creates hierarchical sunburst charts from CSV data, supporting up to 5 levels of hierarchy with excellent color discrimination, professional formatting, and advanced visualization controls.
 
 ![Sunburst Chart Example](sunburst_chart.png)
 
@@ -10,17 +10,18 @@ A powerful Python script that creates hierarchical sunburst charts from CSV data
 - **Multi-level Hierarchy**: Support for 3-5 hierarchical levels
 - **Dynamic Structure**: Automatically adapts ring widths based on number of levels
 - **Smart Color Coding**: Distinct colors for maximum discrimination between segments
-- **Guaranteed Labeling**: All level 2 segments always get labels
+- **Intelligent Labeling**: Consistent threshold-based labeling across all levels
 - **Perfect Text Orientation**: Labels always radiate outward (never upside down)
 - **Multiple Output Formats**: PNG, PDF, SVG, EPS, JPG, TIFF
 
-### 🎨 **Visual Excellence**
+### 🎨 **Visual Excellence & Control**
+- **Customizable Line Width**: Ultra-thin (0.1) to bold (2.0+) segment borders
+- **Smart Slice Aggregation**: Automatically groups small segments into "Other" category
 - **Hierarchical Color Inheritance**: Two modes for simplified color palettes
 - **Color Variations**: Create progressive color shades through hierarchy levels
 - **Same Color Mode**: Use identical colors across inheritance levels
 - **Black Text**: All text is rendered in black for maximum readability
 - **Smart Font Sizing**: Adaptive font sizes based on segment size and level
-- **Clean Borders**: White borders for clear segment separation
 - **Professional Layout**: Optimized spacing and proportions
 - **Scalable Output**: Vector formats (SVG, PDF, EPS) for infinite scalability
 
@@ -45,7 +46,7 @@ Save the script as `sunburst_chart_script.py` in your working directory.
 
 ### Basic Usage
 ```bash
-python sunburst_chart_script.py your_data.csv
+python sunburst_script.py your_data.csv
 ```
 
 This creates a sunburst chart with:
@@ -53,10 +54,20 @@ This creates a sunburst chart with:
 - **Level 2**: `partner` column  
 - **Level 3**: `Project-Code` column
 - **Output**: `sunburst_chart.png` (plus auto-generated SVG and PDF versions)
+- **Enhanced defaults**: Thinner lines (0.5), consistent labeling (5° threshold)
+
+### Clean, Professional Charts
+```bash
+# Minimal visual clutter - recommended for complex data
+python sunburst_script.py data.csv --line-width 0.3 --threshold 8.0
+
+# Ultra-clean appearance
+python sunburst_script.py data.csv --line-width 0.1 --threshold 12.0 --label-threshold 7.0
+```
 
 ### Custom Column Names
 ```bash
-python sunburst_chart_script.py data.csv \
+python sunburst_script.py data.csv \
   --level1 "Category" \
   --level2 "Subcategory" \
   --level3 "Item"
@@ -65,35 +76,53 @@ python sunburst_chart_script.py data.csv \
 ### Count Unique Values
 ```bash
 # Count all records (default behavior)
-python sunburst_chart_script.py data.csv
+python sunburst_script.py data.csv
 
 # Count unique values in Sample-ID column
-python sunburst_chart_script.py data.csv --count-unique
+python sunburst_script.py data.csv --count-unique
 
 # Count unique species (useful for biodiversity analysis)
-python sunburst_chart_script.py data.csv --sample-id "Species" --count-unique
+python sunburst_script.py data.csv --sample-id "Species" --count-unique
+```
+
+### Visual Enhancement Options
+```bash
+# Thinner borders for cleaner look
+python sunburst_script.py data.csv --line-width 0.3
+
+# Group small slices (< 10%) into "Other"
+python sunburst_script.py data.csv --threshold 10.0
+
+# Custom aggregation label
+python sunburst_script.py data.csv --threshold 8.0 --other-label "Miscellaneous"
+
+# Control label visibility (only segments > 7 degrees get labels)
+python sunburst_script.py data.csv --label-threshold 7.0
+
+# Ultra-clean combination
+python sunburst_script.py data.csv --line-width 0.2 --threshold 12.0 --label-threshold 8.0
 ```
 
 ### Color Inheritance
 ```bash
 # Default: Level 1 inheritance with color variations (progressive shading)
-python sunburst_chart_script.py data.csv --color-inherit-level 1 --color-mode variations
+python sunburst_script.py data.csv --color-inherit-level 1 --color-mode variations
 
 # Level 1 inheritance with same colors (no shading)
-python sunburst_chart_script.py data.csv --color-inherit-level 1 --color-mode same
+python sunburst_script.py data.csv --color-inherit-level 1 --color-mode same
 
 # Level 2 inheritance: Levels 1-2 get unique colors, level 3+ inherit from level 2
-python sunburst_chart_script.py data.csv --color-inherit-level 2 --color-mode variations
+python sunburst_script.py data.csv --color-inherit-level 2 --color-mode variations
 
 # Level 3 inheritance with same colors throughout deeper levels
-python sunburst_chart_script.py data.csv --color-inherit-level 3 --color-mode same
+python sunburst_script.py data.csv --color-inherit-level 3 --color-mode same
 ```
 ```bash
 # 4 levels
-python sunburst_chart_script.py data.csv --level4 "SubItem"
+python sunburst_script.py data.csv --level4 "SubItem"
 
 # 5 levels  
-python sunburst_chart_script.py data.csv \
+python sunburst_script.py data.csv \
   --level4 "SubItem" \
   --level5 "DetailLevel"
 ```
@@ -117,6 +146,10 @@ python sunburst_chart_script.py data.csv \
 | `--width` | `18` | Figure width in inches |
 | `--height` | `18` | Figure height in inches |
 | `--no-auto-formats` | `False` | Skip automatic SVG/PDF generation |
+| `--line-width` | `0.5` | **NEW**: Width of segment borders (was 2.0 in original) |
+| `--threshold` | `0.0` | **NEW**: Percentage threshold for small slice aggregation (0-100) |
+| `--other-label` | `"Other"` | **NEW**: Label for aggregated small items |
+| `--label-threshold` | `5.0` | **NEW**: Minimum segment angle (degrees) for showing labels |
 
 ## Output Formats
 
@@ -131,13 +164,13 @@ python sunburst_chart_script.py data.csv \
 ### Format Examples
 ```bash
 # SVG for editing in Illustrator
-python sunburst_chart_script.py data.csv --output chart.svg
+python sunburst_script.py data.csv --output chart.svg
 
 # PDF for LaTeX documents
-python sunburst_chart_script.py data.csv --output chart.pdf
+python sunburst_script.py data.csv --output chart.pdf
 
 # High-resolution PNG only
-python sunburst_chart_script.py data.csv --output chart.png --no-auto-formats
+python sunburst_script.py data.csv --output chart.png --no-auto-formats
 ```
 
 ### Automatic Format Generation
@@ -174,63 +207,23 @@ BGE_004,partner,NHMUK,BNHMUK,Marine,Fish
 
 ### Basic 3-Level Chart
 ```bash
-python sunburst_chart_script.py museum_data.csv \
+python sunburst_script.py museum_data.csv \
   --level1 "Institution_Type" \
   --level2 "Institution_Name" \
   --level3 "Collection_Type" \
   --title "Museum Collections Analysis"
 ```
 
-### Species Diversity Analysis
+### Clean Professional Chart
 ```bash
-python sunburst_chart_script.py biodiversity_data.csv \
+python sunburst_script.py biodiversity_data.csv \
   --level1 "Kingdom" \
   --level2 "Phylum" \
   --level3 "Class" \
-  --sample-id "Species" \
-  --count-unique \
-  --title "Species Diversity by Taxonomy"
-```
-
-### Extended 5-Level Analysis
-```bash
-python sunburst_chart_script.py biodiversity_data.csv \
-  --level1 "Kingdom" \
-  --level2 "Phylum" \
-  --level3 "Class" \
-  --level4 "Order" \
-  --level5 "Family" \
-  --output "biodiversity_sunburst.svg" \
-  --title "Biodiversity Distribution"
-```
-
-### Simplified Color Palette
-```bash
-# Color variations: Progressive shading through hierarchy levels
-python sunburst_chart_script.py biodiversity_data.csv \
-  --color-inherit-level 1 \
-  --color-mode variations \
-  --title "Progressive Color Shading"
-
-# Same colors: Identical colors for all inherited levels
-python sunburst_chart_script.py biodiversity_data.csv \
-  --color-inherit-level 1 \
-  --color-mode same \
-  --title "Uniform Color Scheme"
-
-# Two-level inheritance with variations
-python sunburst_chart_script.py biodiversity_data.csv \
-  --color-inherit-level 2 \
-  --color-mode variations \
-  --title "Two-Level Color Variations"
-```
-
-### Large Format for Printing
-```bash
-python sunburst_chart_script.py data.csv \
-  --width 24 \
-  --height 24 \
-  --output "poster_chart.pdf"
+  --line-width 0.3 \
+  --threshold 8.0 \
+  --label-threshold 6.0 \
+  --title "Clean Biodiversity Distribution"
 ```
 
 ## Output Description
@@ -242,9 +235,9 @@ When you run the script, you typically get:
 3. **PDF version**: `chart.pdf` (for printing)
 
 ### Chart Structure
-- **Center Circle**: Total sample count
-- **Ring 1**: First hierarchy level (e.g., partner types)
-- **Ring 2**: Second hierarchy level (e.g., individual partners)
+- **Center Circle**: Total count
+- **Ring 1**: First hierarchy level
+- **Ring 2**: Second hierarchy level
 - **Ring 3+**: Additional hierarchy levels
 - **Legend**: Shows level 1 categories with counts
 
@@ -253,7 +246,9 @@ When you run the script, you typically get:
 - **Hierarchical Color Scheme**: Two inheritance modes for optimal visual organization
 - **Black Text Labels**: All segments labeled with name and count in crisp black text
 - **Professional Typography**: Optimized fonts and sizing
-- **Clean Borders**: White borders separate all segments
+- **Customizable Borders**: Thin to bold segment separation lines
+- **Smart Label Management**: Only meaningful segments get labels (configurable threshold)
+- **Clean Aggregation**: Small segments automatically grouped into "Other" category
 
 ## Counting Modes
 
@@ -268,29 +263,6 @@ The script supports two counting modes that determine how data is aggregated in 
 - **Behavior**: Counts unique values in the specified `--sample-id` column
 - **Use Case**: Shows diversity, distinct items, or unique occurrences
 - **Example**: If you have 5 specimens of the same species, it counts as 1
-
-### Practical Examples
-
-#### Biodiversity Analysis
-```bash
-# Count total specimens per family
-python sunburst_chart_script.py biodiversity.csv \
-  --level1 "Class" --level2 "Order" --level3 "Family"
-
-# Count unique species per family  
-python sunburst_chart_script.py biodiversity.csv \
-  --level1 "Class" --level2 "Order" --level3 "Family" \
-  --sample-id "Species" --count-unique
-```
-
-#### Sample Processing Analysis
-```bash
-# Count total processing attempts
-python sunburst_chart_script.py lab_data.csv
-
-# Count unique samples processed
-python sunburst_chart_script.py lab_data.csv --count-unique
-```
 
 ### When to Use Each Mode
 
@@ -336,16 +308,110 @@ Uses identical colors across inheritance levels:
 ### Examples
 ```bash
 # Traditional approach (many distinct colors at each level)
-python sunburst_chart_script.py data.csv --color-inherit-level 5
+python sunburst_script.py data.csv --color-inherit-level 5
 
 # Progressive shading (default)
-python sunburst_chart_script.py data.csv --color-inherit-level 1 --color-mode variations
+python sunburst_script.py data.csv --color-inherit-level 1 --color-mode variations
 
 # Uniform color families
-python sunburst_chart_script.py data.csv --color-inherit-level 1 --color-mode same
+python sunburst_script.py data.csv --color-inherit-level 1 --color-mode same
 
 # Two-level hierarchy with shading
-python sunburst_chart_script.py data.csv --color-inherit-level 2 --color-mode variations
+python sunburst_script.py data.csv --color-inherit-level 2 --color-mode variations
+```
+
+## 🆕 Enhanced Visual Controls
+
+### Line Width Customization
+Control the thickness of segment borders for different visual styles:
+
+```bash
+# Ultra-thin borders (minimal visual noise)
+python sunburst_script.py data.csv --line-width 0.1
+
+# Thin borders (recommended for complex charts)
+python sunburst_script.py data.csv --line-width 0.3
+
+# Default enhanced thickness
+python sunburst_script.py data.csv --line-width 0.5
+
+# Traditional thick borders
+python sunburst_script.py data.csv --line-width 2.0
+```
+
+### Small Slice Aggregation
+Automatically group small segments to reduce visual clutter:
+
+```bash
+# Group segments smaller than 10% into "Other"
+python sunburst_script.py data.csv --threshold 10.0
+
+# Conservative aggregation (5% threshold)
+python sunburst_script.py data.csv --threshold 5.0
+
+# Aggressive aggregation with custom label
+python sunburst_script.py data.csv --threshold 15.0 --other-label "Minor Categories"
+
+# Combined with visual enhancements
+python sunburst_script.py data.csv --line-width 0.2 --threshold 8.0
+```
+
+### Label Threshold Control
+Determine which segments get labels based on their visual size:
+
+```bash
+# Default: show labels for segments > 5 degrees
+python sunburst_script.py data.csv --label-threshold 5.0
+
+# More restrictive: only larger segments get labels
+python sunburst_script.py data.csv --label-threshold 10.0
+
+# Less restrictive: more small segments get labels
+python sunburst_script.py data.csv --label-threshold 2.0
+
+# Ultra-clean: combined restrictions
+python sunburst_script.py data.csv --threshold 12.0 --label-threshold 8.0
+```
+
+#### **How Thresholds Work**
+
+**Small Slice Threshold (`--threshold`)**:
+- Measured as **percentage of level total**
+- `--threshold 10.0` = group items < 10% of their ring
+- Applied independently at each hierarchy level
+- Only aggregates when multiple small items exist
+
+**Label Threshold (`--label-threshold`)**:
+- Measured in **degrees of the circle** (360° total)
+- `--label-threshold 5.0` = ~1.4% of circle circumference
+- Applied consistently across all hierarchy levels
+- Prevents tiny, unreadable labels
+
+### Recommended Combinations
+
+#### **For Complex Data (many small categories)**
+```bash
+python sunburst_script.py data.csv \
+  --line-width 0.2 \
+  --threshold 8.0 \
+  --label-threshold 6.0
+```
+
+#### **For Presentation/Publication**
+```bash
+python sunburst_script.py data.csv \
+  --line-width 0.3 \
+  --threshold 10.0 \
+  --label-threshold 5.0 \
+  --output presentation.svg
+```
+
+#### **For Detailed Analysis (preserve small details)**
+```bash
+python sunburst_script.py data.csv \
+  --line-width 0.5 \
+  --threshold 0.0 \
+  --label-threshold 3.0
 ```
 
 ## Performance Notes
@@ -363,7 +429,6 @@ python sunburst_chart_script.py data.csv --color-inherit-level 2 --color-mode va
 ### Optimization Tips
 - Remove unnecessary columns before processing
 - Use `--no-auto-formats` if you only need one format
-- For very large datasets, consider sampling or aggregation
 
 ## Troubleshooting
 
@@ -371,7 +436,7 @@ python sunburst_chart_script.py data.csv --color-inherit-level 2 --color-mode va
 
 #### "Column not found" Error
 ```
-ValueError: Column 'Partner_sub' not found in CSV
+ValueError: Column 'X' not found in CSV
 ```
 **Solution**: Check your column names and use the correct `--level1`, `--level2`, etc. options.
 
@@ -397,31 +462,23 @@ The script automatically reports:
 ### Debug Mode
 For troubleshooting, the script prints detailed information:
 ```
-Loaded 34905 rows from bge_museum_data.csv
+Loaded 34905 rows from data.csv
 After removing rows with missing data: 34905 rows
-Active hierarchy levels: 3 - ['Partner_sub', 'partner', 'Project-Code']
+Active hierarchy levels: 3 - ['Kingdom', 'Phylum', 'Class']
 Creating 3 level sunburst with radii: [0.15, 0.38333333333333336, 0.6166666666666667, 0.85]
+Color inheritance level: 1
+Color mode: variations
+Line width: 0.5
+Small slice threshold: 0.0%
+Label threshold: 5.0 degrees
 ```
 
 ## License
 
 This script is provided as-is for research and educational purposes. Feel free to modify and distribute.
 
-## Contributing
-
-To improve this script:
-1. Fork or copy the script
-2. Make your improvements
-3. Test with various datasets
-4. Share your enhancements
-
-## Citation
-
-If you use this script in research or publications, please cite:
-```
-Sunburst Chart Generator. (2024). Python script for hierarchical data visualization.
-```
-
 ---
 
-**Need help?** Check the examples above or run `python sunburst_chart_script.py --help` for detailed options.
+**Need help?** Check the examples above or run `python sunburst_script.py --help` for detailed options.
+
+---

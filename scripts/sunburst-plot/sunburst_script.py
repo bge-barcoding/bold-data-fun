@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Sunburst Chart Generator
-Creates a hierarchical sunburst plot similar to Excel's sunburst chart
+Enhanced Sunburst Chart Generator
+Creates a hierarchical sunburst plot with optional small slice aggregation and customizable line thickness
 """
 
 import pandas as pd
@@ -75,6 +75,49 @@ def load_and_process_data(csv_file, sample_id_col, level_cols, count_unique=Fals
         print(f"Error processing data: {e}")
         sys.exit(1)
 
+def aggregate_small_slices(data_dict, threshold_percent, total_for_level, other_label="Other"):
+    """
+    Aggregate small slices into an "Other" category based on percentage threshold
+    
+    Args:
+        data_dict: Dictionary of items to potentially aggregate
+        threshold_percent: Minimum percentage threshold (0-100) for individual items
+        total_for_level: Total count for the current level
+        other_label: Label to use for aggregated small items
+    
+    Returns:
+        Tuple of (aggregated_dict, other_items_list)
+    """
+    if threshold_percent <= 0:
+        return data_dict, []
+    
+    threshold_count = (threshold_percent / 100.0) * total_for_level
+    
+    # Separate items above and below threshold
+    main_items = {}
+    small_items = {}
+    other_total = 0
+    
+    for key, value in data_dict.items():
+        item_count = calculate_total_recursive(value) if not isinstance(value, int) else value
+        
+        if item_count >= threshold_count:
+            main_items[key] = value
+        else:
+            small_items[key] = value
+            other_total += item_count
+    
+    # If we have small items to aggregate and it would be meaningful
+    if small_items and len(small_items) > 1 and other_total > 0:
+        # Add the "Other" category
+        main_items[other_label] = other_total
+        
+        print(f"    Aggregated {len(small_items)} items < {threshold_percent}% into '{other_label}' ({other_total:,} total)")
+        return main_items, list(small_items.keys())
+    else:
+        # Don't aggregate if only one small item or no small items
+        return data_dict, []
+
 def generate_distinct_colors(n_colors):
     """Generate highly distinct colors for better discrimination"""
     if n_colors <= 12:
@@ -130,15 +173,18 @@ def calculate_total_recursive(data):
 
 def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='sunburst_chart.png', 
                          title='Data Sunburst Analysis', figsize=(18, 18), auto_formats=True,
-                         color_inherit_level=1, color_mode='variations', count_unique=False):
+                         color_inherit_level=1, color_mode='variations', count_unique=False,
+                         line_width=0.5, threshold_percent=0.0, other_label="Other", 
+                         label_threshold=5.0):
     """
     Create a sunburst chart with hierarchical segments for up to 5 levels
     
     Args:
+        line_width: Width of lines between segments (default: 0.5, original was 2)
+        threshold_percent: Percentage threshold for aggregating small slices (0 = no aggregation)
+        other_label: Label to use for aggregated small items
+        label_threshold: Minimum angle in degrees for showing labels (default: 5.0)
         color_inherit_level: Level from which colors should be inherited (1-based indexing)
-                           1 = each level 1 segment and its descendants get unique colors
-                           2 = levels 1-2 get unique colors, level 3+ inherit from level 2
-                           etc.
         color_mode: 'variations' = create color variations for deeper levels
                    'same' = use exact same colors for all levels
     """    
@@ -154,9 +200,28 @@ def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='
     print(f"Creating {n_levels} level sunburst with radii: {radii}")
     print(f"Color inheritance level: {color_inherit_level}")
     print(f"Color mode: {color_mode}")
+    print(f"Line width: {line_width}")
+    print(f"Small slice threshold: {threshold_percent}%")
+    print(f"Label threshold: {label_threshold} degrees")
+    
+    # Apply small slice aggregation to level 1 if threshold is set
+    processed_hierarchy = dict(hierarchy)
+    aggregation_info = {}  # Track what was aggregated
+    
+    if threshold_percent > 0:
+        print(f"Applying {threshold_percent}% threshold for small slice aggregation:")
+        level1_totals = {k: calculate_total_recursive(v) for k, v in hierarchy.items()}
+        total_for_level1 = sum(level1_totals.values())
+        
+        processed_hierarchy, aggregated_items = aggregate_small_slices(
+            hierarchy, threshold_percent, total_for_level1, other_label
+        )
+        
+        if aggregated_items:
+            aggregation_info['level_1'] = aggregated_items
     
     # Calculate totals for level 1 and sort
-    level1_totals = {k: calculate_total_recursive(v) for k, v in hierarchy.items()}
+    level1_totals = {k: calculate_total_recursive(v) for k, v in processed_hierarchy.items()}
     level1_sorted = sorted(level1_totals.items(), key=lambda x: x[1], reverse=True)
     
     # Generate distinct colors for level 1
@@ -169,16 +234,35 @@ def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='
         """Recursively process each level of the hierarchy"""
         if level >= n_levels:
             return
+        
+        # Apply small slice aggregation if enabled and we're not at the top level or processing aggregated data
+        processed_data = data_dict
+        if threshold_percent > 0 and level > 0 and other_label not in str(path):
+            # Calculate total for this level
+            if isinstance(list(data_dict.values())[0], int):
+                total_for_level = sum(data_dict.values())
+            else:
+                total_for_level = sum(calculate_total_recursive(v) for v in data_dict.values())
             
+            processed_data, aggregated_items = aggregate_small_slices(
+                data_dict, threshold_percent, total_for_level, other_label
+            )
+            
+            if aggregated_items:
+                level_key = f"level_{level + 1}"
+                if level_key not in aggregation_info:
+                    aggregation_info[level_key] = []
+                aggregation_info[level_key].extend([f"{'/'.join(path)}/{item}" for item in aggregated_items])
+        
         # Sort items by size
-        if isinstance(list(data_dict.values())[0], int):
+        if isinstance(list(processed_data.values())[0], int):
             # Final level - values are integers
-            items_sorted = sorted(data_dict.items(), key=lambda x: x[1], reverse=True)
-            total_for_level = sum(data_dict.values())
+            items_sorted = sorted(processed_data.items(), key=lambda x: x[1], reverse=True)
+            total_for_level = sum(processed_data.values())
         else:
             # Intermediate level - values are dictionaries
-            items_sorted = sorted(data_dict.items(), key=lambda x: calculate_total_recursive(x[1]), reverse=True)
-            total_for_level = sum(calculate_total_recursive(v) for v in data_dict.values())
+            items_sorted = sorted(processed_data.items(), key=lambda x: calculate_total_recursive(x[1]), reverse=True)
+            total_for_level = sum(calculate_total_recursive(v) for v in processed_data.values())
         
         current_angle = parent_angle_start
         
@@ -189,7 +273,7 @@ def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='
             # Before or at inheritance level - use distinct colors
             if level == 0:
                 # Level 1 uses predefined distinct colors
-                level_colors = [base_color_map[key] for key, _ in items_sorted]
+                level_colors = [base_color_map.get(key, '#CCCCCC') for key, _ in items_sorted]
             else:
                 # Generate distinct colors for this level
                 level_colors = generate_distinct_colors(len(items_sorted))
@@ -234,30 +318,24 @@ def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='
             current_angle += angle_size
     
     # Start processing from level 1
-    process_level(hierarchy, 0, 0, 360, None, [])
+    process_level(processed_hierarchy, 0, 0, 360, None, [])
     
     # Draw all segments
     for segment in segments:
-        # Create wedge
+        # Create wedge with customizable line width
         wedge = mpatches.Wedge(
             (0, 0), segment['outer_radius'],
             segment['start_angle'], segment['end_angle'],
             width=segment['outer_radius'] - segment['inner_radius'],
             facecolor=segment['color'],
             edgecolor='white',
-            linewidth=2
+            linewidth=line_width  # Now customizable
         )
         ax.add_patch(wedge)
         
-        # Calculate if we should show label
+        # Calculate if we should show label based on angle size threshold
         angle_size = segment['end_angle'] - segment['start_angle']
-        show_label = False
-        
-        # Always show level 2 labels, and others based on size
-        if segment['level'] == 2:
-            show_label = True
-        elif angle_size > 5:  # Show other levels if segment > 5 degrees
-            show_label = True
+        show_label = angle_size > label_threshold  # Apply consistent threshold to all levels
             
         if show_label:
             # Calculate label position
@@ -359,6 +437,20 @@ def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='
     print(f"Number of levels: {n_levels}")
     print(f"Color inheritance from level: {color_inherit_level}")
     print(f"Color mode: {color_mode}")
+    print(f"Line width: {line_width}")
+    print(f"Label threshold: {label_threshold} degrees")
+    
+    # Report aggregation results
+    if aggregation_info:
+        print(f"\nSmall slice aggregation (threshold: {threshold_percent}%):")
+        for level_key, items in aggregation_info.items():
+            level_num = level_key.split('_')[1]
+            print(f"  Level {level_num}: {len(items)} items aggregated into '{other_label}'")
+            for item in items[:5]:  # Show first 5 items
+                print(f"    - {item}")
+            if len(items) > 5:
+                print(f"    ... and {len(items) - 5} more")
+    
     for i, level_name in enumerate(active_levels):
         level_segments = [s for s in segments if s['level'] == i + 1]
         print(f"Level {i+1} ({level_name}): {len(level_segments)} categories")
@@ -395,7 +487,22 @@ def main():
     parser.add_argument('--no-auto-formats', action='store_true', 
                        help='Skip automatic generation of SVG and PDF versions')
     
+    # NEW ARGUMENTS for enhancements
+    parser.add_argument('--line-width', type=float, default=0.5,
+                       help='Width of lines between segments (default: 0.5, original was 2.0)')
+    parser.add_argument('--threshold', type=float, default=0.0,
+                       help='Percentage threshold for aggregating small slices into "Other" group (0-100, default: 0 = no aggregation)')
+    parser.add_argument('--other-label', default='Other',
+                       help='Label to use for aggregated small items (default: "Other")')
+    parser.add_argument('--label-threshold', type=float, default=5.0,
+                       help='Minimum angle in degrees for showing segment labels (default: 5.0)')
+    
     args = parser.parse_args()
+    
+    # Validate threshold
+    if args.threshold < 0 or args.threshold > 100:
+        print(f"Error: --threshold must be between 0 and 100 (got {args.threshold})")
+        sys.exit(1)
     
     # Validate color inheritance level
     level_cols = [args.level1, args.level2, args.level3, args.level4, args.level5]
@@ -419,30 +526,34 @@ def main():
         auto_formats=not args.no_auto_formats,
         color_inherit_level=args.color_inherit_level,
         color_mode=args.color_mode,
-        count_unique=args.count_unique
+        count_unique=args.count_unique,
+        line_width=args.line_width,
+        threshold_percent=args.threshold,
+        other_label=args.other_label,
+        label_threshold=args.label_threshold
     )
 
 if __name__ == "__main__":
     # Example usage if run directly
     if len(sys.argv) == 1:
-        print("Example usage:")
-        print("python sunburst_chart_script.py bge_museum_data.csv")
-        print("python sunburst_chart_script.py data.csv --output chart.svg")
-        print("python sunburst_chart_script.py data.csv --output chart.pdf")
-        print("python sunburst_chart_script.py data.csv --level4 Category4 --level5 Category5")
-        print("python sunburst_chart_script.py data.csv --color-inherit-level 2")
-        print("python sunburst_chart_script.py data.csv --color-inherit-level 1 --color-mode same")
-        print("python sunburst_chart_script.py data.csv --count-unique")
-        print("python sunburst_chart_script.py data.csv --sample-id Species --count-unique")
+        print("Enhanced Sunburst Chart Generator")
+        print("=================================")
+        print("\nBasic usage:")
+        print("python enhanced_sunburst_chart_script.py bge_museum_data.csv")
+        print("\nNew features:")
+        print("python enhanced_sunburst_chart_script.py data.csv --line-width 0.2    # Thinner lines")
+        print("python enhanced_sunburst_chart_script.py data.csv --threshold 5.0     # Group items < 5% into 'Other'")
+        print("python enhanced_sunburst_chart_script.py data.csv --label-threshold 3.0  # Only show labels for segments > 3 degrees")
+        print("python enhanced_sunburst_chart_script.py data.csv --threshold 10 --other-label 'Miscellaneous'")
+        print("\nCombined usage:")
+        print("python enhanced_sunburst_chart_script.py data.csv --line-width 0.3 --threshold 8.0")
+        print("\nAll original features still supported:")
+        print("python enhanced_sunburst_chart_script.py data.csv --output chart.svg")
+        print("python enhanced_sunburst_chart_script.py data.csv --level4 Category4 --level5 Category5")
+        print("python enhanced_sunburst_chart_script.py data.csv --color-inherit-level 2")
+        print("python enhanced_sunburst_chart_script.py data.csv --count-unique")
         print("\nSupported formats: PNG, JPG, PDF, SVG, EPS, TIFF")
         print("Note: SVG and PDF versions are automatically created for editing")
-        print("\nColor inheritance examples:")
-        print("  --color-inherit-level 1: Each top-level category gets unique colors")
-        print("  --color-inherit-level 2: Levels 1-2 get unique colors, 3+ inherit from level 2")
-        print("  --color-inherit-level 3: Levels 1-3 get unique colors, 4+ inherit from level 3")
-        print("\nColor modes:")
-        print("  --color-mode variations: Create color shades for deeper levels (default)")
-        print("  --color-mode same: Use identical colors for all inherited levels")
-        print("\nFor help: python sunburst_chart_script.py --help")
+        print("\nFor help: python enhanced_sunburst_chart_script.py --help")
     else:
         main()
