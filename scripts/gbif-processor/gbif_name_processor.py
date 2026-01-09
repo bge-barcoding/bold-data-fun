@@ -13,7 +13,7 @@ Workflow Context:
 Input Requirements:
     - Input CSV must contain columns: ID, scientificName, type_status, gbif_status,
       gbif_matchType, gbif_species, gbif_genus, gbif_family, gbif_order, gbif_class,
-      gbif_phylum, gbif_speciesKey
+      gbif_phylum, gbif_speciesKey, gbif_genusKey
     - Rules CSV must contain columns:
         Required: status, matchType, 'GBIF species value', 'GBIF genus value',
                   'Type specimen', 'name to use'
@@ -32,6 +32,12 @@ Output Files:
     1. {basename}_request_taxid.tsv
        Names where the original should be used, formatted for ENA taxonomy requests.
        Columns: proposed_name, name_type, host, project_id, description
+       Notes:
+         - Deduplicated by proposed_name (unique species names only)
+         - Description contains GBIF URL; falls back to gbif_genusKey if
+           gbif_speciesKey is empty/NOT_FOUND (these rows are also added to
+           manually_verify.csv)
+         - Type specimens are annotated with "| TYPE" appended to description
 
     2. {basename}_check_ENA.csv
        Names where the GBIF name should be used, requiring ENA validation.
@@ -44,6 +50,9 @@ Output Files:
 
     4. {basename}_manually_verify.csv
        Rows flagged for manual verification, containing all original input columns.
+
+    5. {basename}.log
+       Log file containing processing summary (same as terminal output).
 
 Usage:
     python gbif_name_processor.py -i INPUT_FILE -r RULES_FILE [-o OUTPUT_DIR] [-p PROJECT_ID]
@@ -136,6 +145,7 @@ def process_row(row: dict, rules: dict) -> dict:
     gbif_genus = row.get('gbif_genus', '').strip()
     gbif_family = row.get('gbif_family', '').strip()
     gbif_key = row.get('gbif_speciesKey', '').strip()
+    gbif_genus_key = row.get('gbif_genusKey', '').strip()
     sample_id = row.get('ID', '').strip()
     
     # Determine if type specimen
@@ -178,6 +188,7 @@ def process_row(row: dict, rules: dict) -> dict:
         'check_ena': 'yes' if rule['check_ena'] else '',
         'manual_verification': 'yes' if rule['manual_verification'] else '',
         'gbif_key': gbif_key,
+        'gbif_genus_key': gbif_genus_key,
         'verbatim_name': verbatim_name,
         'gbif_species': gbif_species,
         'gbif_genus': gbif_genus,
@@ -223,7 +234,7 @@ def process_file(input_file: str, rules_file: str, output_dir: str = None, proje
     manually_verify_file = out_path / f"{basename}_manually_verify.csv"
     
     # Read input and process
-    original_rows = []  # For request_taxid.tsv
+    original_names = {}  # Dict keyed by proposed_name: {'gbif_key': str, 'is_type': bool}
     gbif_rows = []      # For check_ENA.csv
     annotated_rows = [] # For annotated.csv
     manually_verify_rows = []  # For manually_verify.csv
@@ -245,14 +256,36 @@ def process_file(input_file: str, rules_file: str, output_dir: str = None, proje
             
             # Route to appropriate output
             if result['name_to_use'] == 'original':
-                gbif_link = f"https://www.gbif.org/species/{result['gbif_key']}" if result['gbif_key'] else ''
-                original_rows.append({
-                    'proposed_name': result['verbatim_name'],
-                    'name_type': 'published_name',
-                    'host': '',
-                    'project_id': project_id,
-                    'description': gbif_link
-                })
+                proposed_name = result['verbatim_name']
+                
+                # Determine which key to use for URL (species key with genus key fallback)
+                gbif_key = result['gbif_key']
+                needs_manual_verify_for_fallback = False
+                if not gbif_key or gbif_key.upper() == 'NOT_FOUND':
+                    gbif_key = result['gbif_genus_key']
+                    needs_manual_verify_for_fallback = True
+                    # Also check if genus key is valid
+                    if not gbif_key or gbif_key.upper() == 'NOT_FOUND':
+                        gbif_key = ''
+                
+                # Track unique names and whether any instance is a type specimen
+                if proposed_name in original_names:
+                    # Update is_type to True if this instance is a type
+                    if result['is_type']:
+                        original_names[proposed_name]['is_type'] = True
+                    # Update needs_manual_verify if this instance needs it
+                    if needs_manual_verify_for_fallback:
+                        original_names[proposed_name]['needs_manual_verify'] = True
+                else:
+                    original_names[proposed_name] = {
+                        'gbif_key': gbif_key,
+                        'is_type': result['is_type'],
+                        'needs_manual_verify': needs_manual_verify_for_fallback
+                    }
+                
+                # Add to manual verification if using genus key fallback AND not already flagged
+                if needs_manual_verify_for_fallback and result['manual_verification'] != 'yes':
+                    manually_verify_rows.append(row.copy())
             elif result['name_to_use'] == 'gbif':
                 gbif_rows.append({
                     'ID': result['sample_id'],
@@ -268,19 +301,43 @@ def process_file(input_file: str, rules_file: str, output_dir: str = None, proje
             if result['manual_verification'] == 'yes':
                 manually_verify_rows.append(row.copy())
     
+    # Build deduplicated original_rows list with TYPE annotation
+    original_rows = []
+    for proposed_name, info in original_names.items():
+        gbif_link = f"https://www.gbif.org/species/{info['gbif_key']}" if info['gbif_key'] else ''
+        if info['is_type']:
+            description = f"{gbif_link} | TYPE" if gbif_link else "TYPE"
+        else:
+            description = gbif_link
+        original_rows.append({
+            'proposed_name': proposed_name,
+            'name_type': 'published_name',
+            'host': '',
+            'project_id': project_id,
+            'description': description
+        })
+    
+    # Prepare log file
+    log_file = out_path / f"{basename}.log"
+    log_lines = []
+    
     # Write request_taxid.tsv
     with open(request_taxid_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=['proposed_name', 'name_type', 'host', 'project_id', 'description'], delimiter='\t')
         writer.writeheader()
         writer.writerows(original_rows)
-    print(f"Created: {request_taxid_file} ({len(original_rows)} rows)")
+    msg = f"Created: {request_taxid_file} ({len(original_rows)} rows)"
+    print(msg)
+    log_lines.append(msg)
     
     # Write check_ENA.csv
     with open(check_ena_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=['ID', 'scientificName', 'genus', 'family', 'order', 'class', 'phylum'])
         writer.writeheader()
         writer.writerows(gbif_rows)
-    print(f"Created: {check_ena_file} ({len(gbif_rows)} rows)")
+    msg = f"Created: {check_ena_file} ({len(gbif_rows)} rows)"
+    print(msg)
+    log_lines.append(msg)
     
     # Write annotated.csv
     new_fieldnames = fieldnames + ['name_to_use', 'description_text', 'check_ENA_with_GBIF', 'manual_verification_needed']
@@ -288,25 +345,42 @@ def process_file(input_file: str, rules_file: str, output_dir: str = None, proje
         writer = csv.DictWriter(f, fieldnames=new_fieldnames)
         writer.writeheader()
         writer.writerows(annotated_rows)
-    print(f"Created: {annotated_file} ({len(annotated_rows)} rows)")
+    msg = f"Created: {annotated_file} ({len(annotated_rows)} rows)"
+    print(msg)
+    log_lines.append(msg)
     
     # Write manually_verify.csv
     with open(manually_verify_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(manually_verify_rows)
-    print(f"Created: {manually_verify_file} ({len(manually_verify_rows)} rows)")
+    msg = f"Created: {manually_verify_file} ({len(manually_verify_rows)} rows)"
+    print(msg)
+    log_lines.append(msg)
     
     # Print summary
     not_possible = sum(1 for r in annotated_rows if r['name_to_use'] == 'not a possible combination')
     unknown = sum(1 for r in annotated_rows if r['name_to_use'] == 'unknown')
+    total_original_records = sum(1 for r in annotated_rows if r['name_to_use'] == 'original')
     
-    print(f"\nSummary:")
-    print(f"  Original: {len(original_rows)}")
-    print(f"  GBIF: {len(gbif_rows)}")
-    print(f"  Manual verification: {len(manually_verify_rows)}")
-    print(f"  Not possible: {not_possible}")
-    print(f"  Unknown (no matching rule): {unknown}")
+    summary_lines = [
+        "",
+        "Summary:",
+        f"  Original: {len(original_rows)} unique names ({total_original_records} total records)",
+        f"  GBIF: {len(gbif_rows)}",
+        f"  Manual verification: {len(manually_verify_rows)}",
+        f"  Not possible: {not_possible}",
+        f"  Unknown (no matching rule): {unknown}"
+    ]
+    
+    for line in summary_lines:
+        print(line)
+        log_lines.append(line)
+    
+    # Write log file
+    with open(log_file, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(log_lines) + '\n')
+    print(f"\nLog saved: {log_file}")
 
 
 def main():
@@ -340,9 +414,9 @@ Example:
         print(f"Error: Rules file not found: {args.rules}", file=sys.stderr)
         sys.exit(1)
     
-    if args.output_dir and not os.path.isdir(args.output_dir):
-        print(f"Error: Output directory not found: {args.output_dir}", file=sys.stderr)
-        sys.exit(1)
+    # Create output directory if specified and doesn't exist
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
     
     process_file(args.input, args.rules, args.output_dir, args.project_id)
 
