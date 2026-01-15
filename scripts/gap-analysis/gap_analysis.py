@@ -543,8 +543,17 @@ def analyze_sharer_names(
             'sharer_type': ''
         }
     
-    # Split sharers
-    sharer_list = [s.strip() for s in sharers.split('|') if s.strip()]
+    # Split sharers - handle both pipe and comma separators
+    # First split on pipe, then split each part on comma
+    sharer_list = []
+    for part in sharers.split('|'):
+        part = part.strip()
+        if part:
+            # Split on comma and add each individual sharer
+            for sharer in part.split(','):
+                sharer = sharer.strip()
+                if sharer:
+                    sharer_list.append(sharer)
     
     if not sharer_list:
         return {
@@ -603,6 +612,67 @@ def analyze_sharer_names(
         'sharer_status': sharer_status,
         'sharer_type': sharer_type
     }
+
+
+def determine_species_status(
+    species_category: str,
+    total_record_count: int,
+    synonym_record_count: int,
+    bags_grade: str,
+    bags_e_sharer_status: str,
+    synonym_bin_status: str,
+    name_representation: str
+) -> str:
+    """
+    Determine traffic light status for a species based on data quality indicators.
+    
+    Priority order (worst to best): Black → Red → Amber → Blue → Green
+    
+    Args:
+        species_category: Valid, Synonym, Extra species, or Extra BIN
+        total_record_count: Number of BOLD records for valid species
+        synonym_record_count: Total records across all synonyms
+        bags_grade: BAGS grade (A-E) or empty
+        bags_e_sharer_status: For BAGS E - All known synonyms, Mix, No known synonyms, or N/A
+        synonym_bin_status: Same BIN, Different BINs, Partial overlap, No data, or N/A
+        name_representation: Valid name only, Valid + synonym(s), Synonym only, No records, or N/A
+    
+    Returns:
+        str: Species status - Green, Amber, Red, Blue, Black, or N/A
+    """
+    # N/A - Not a target species from input list
+    if species_category in ('Extra BIN', 'Extra species', 'Synonym'):
+        return 'N/A'
+    
+    # BLACK - No coverage at all
+    if total_record_count == 0 and synonym_record_count == 0:
+        return 'Black'
+    
+    # RED - Serious issues requiring investigation
+    # BAGS E with unknown or mixed sharers
+    if bags_grade == 'E' and bags_e_sharer_status in ('No known synonyms', 'Mix (synonyms + extras)'):
+        return 'Red'
+    # Synonyms in completely different BINs (taxonomic concern)
+    if synonym_bin_status == 'Different BINs':
+        return 'Red'
+    
+    # AMBER - Known issues, synonymy/taxonomy needs work
+    # BAGS E but all sharers are known synonyms
+    if bags_grade == 'E' and bags_e_sharer_status == 'All known synonyms':
+        return 'Amber'
+    # Partial BIN overlap between valid and synonyms
+    if synonym_bin_status == 'Partial overlap':
+        return 'Amber'
+    # Both valid name and synonym(s) have records
+    if name_representation == 'Valid + synonym(s)':
+        return 'Amber'
+    
+    # BLUE - Nomenclatural issue (valid name absent)
+    if name_representation == 'Synonym only':
+        return 'Blue'
+    
+    # GREEN - Clean, no issues
+    return 'Green'
 
 
 def get_all_input_species_bins(
@@ -785,7 +855,7 @@ def load_result_output(result_file: Path) -> Tuple[Dict, Dict, Dict, Dict, Set, 
                     species_full = row.get('species', '').strip()
                     subspecies = row.get('subspecies', '').strip()
                     taxonid = row.get('taxonid', '').strip()
-                    bin_field = row.get('BIN', '').strip()
+                    bin_field = row.get('bin_uri', '').strip()
                     
                     if not species_full or not taxonid:
                         continue
@@ -976,6 +1046,15 @@ def perform_gap_analysis(
                 result = {
                     # Core identification
                     'species': format_species_name(species_lower),
+                    'species_status': determine_species_status(
+                        category_info['category'],
+                        taxonid_record_count.get(taxonid, 0),
+                        name_rep['synonym_record_count'],
+                        bags_info.get('BAGS', ''),
+                        sharer_analysis['sharer_status'],
+                        syn_analysis['status'],
+                        name_rep['representation']
+                    ),
                     'synonyms': '|'.join(synonyms) if synonyms else '',
                     
                     # Classification (NEW: species_category replaces gaplist_species)
@@ -1034,6 +1113,15 @@ def perform_gap_analysis(
             result = {
                 # Core identification
                 'species': format_species_name(species_lower),
+                'species_status': determine_species_status(
+                    'Valid',
+                    0,
+                    name_rep['synonym_record_count'],
+                    '',
+                    '',
+                    syn_analysis['status'],
+                    name_rep['representation']
+                ),
                 'synonyms': '|'.join(synonyms) if synonyms else '',
                 
                 # Classification
@@ -1106,6 +1194,15 @@ def perform_gap_analysis(
                 result = {
                     # Core identification
                     'species': format_species_name(species_lower),
+                    'species_status': determine_species_status(
+                        category_info['category'],
+                        taxonid_record_count.get(taxonid, 0),
+                        0,
+                        bags_info.get('BAGS', ''),
+                        sharer_analysis['sharer_status'],
+                        'N/A',
+                        'N/A'
+                    ),
                     'synonyms': '',  # Extra species don't have synonyms listed
                     
                     # Classification
@@ -1162,6 +1259,20 @@ def perform_gap_analysis(
     logging.info(f"  - Extra BIN (shares BIN with input species): {extra_bin_count}")
     logging.info(f"  - Species with BAGS assessment: {species_with_bags}")
     
+    # Species status summary (traffic light system)
+    green_count = len([r for r in results if r['species_status'] == 'Green'])
+    amber_count = len([r for r in results if r['species_status'] == 'Amber'])
+    red_count = len([r for r in results if r['species_status'] == 'Red'])
+    blue_count = len([r for r in results if r['species_status'] == 'Blue'])
+    black_count = len([r for r in results if r['species_status'] == 'Black'])
+    
+    logging.info(f"  Species status summary:")
+    logging.info(f"    - Green (clean): {green_count}")
+    logging.info(f"    - Amber (known issues): {amber_count}")
+    logging.info(f"    - Red (needs investigation): {red_count}")
+    logging.info(f"    - Blue (nomenclatural fix): {blue_count}")
+    logging.info(f"    - Black (no coverage): {black_count}")
+    
     return results
 
 
@@ -1172,6 +1283,7 @@ def write_gap_analysis(results: List[Dict], output_file: Path) -> None:
     fieldnames = [
         # Core identification
         'species',
+        'species_status',
         'synonyms',
         
         # Classification
