@@ -46,6 +46,56 @@ import argparse
 import pandas as pd
 from pathlib import Path
 import sys
+from openpyxl import load_workbook
+from openpyxl.styles import Protection
+from openpyxl.utils import get_column_letter
+
+
+# Define required output columns in exact order
+REQUIRED_COLUMNS = [
+    'sort_order',
+    'fluidx_box_barcode',
+    'fluidx_box_position',
+    'fluidx_tube',
+    'processing_notes',
+    'processid',
+    'sampleid',
+    'bin_uri',
+    'representative_specimen',
+    'family',
+    'genus',
+    'species',
+    'subspecies',
+    'morph_family',
+    'morph_genus',
+    'morph_species',
+    'morph_subspecies',
+    'morph_notes',
+    'collectors',
+    'collection_date_start',
+    'coord',
+    'nuc'
+]
+
+# Define columns that should be unlocked (editable)
+UNLOCKED_COLUMNS = [
+    'fluidx_box_barcode',
+    'fluidx_box_position',
+    'fluidx_tube',
+    'processing_notes',
+    'morph_family',
+    'morph_genus',
+    'morph_species',
+    'morph_subspecies',
+    'morph_notes'
+]
+
+# Sheet protection password
+SHEET_PASSWORD = 'bioscan'
+
+# Column width in pixels (Excel uses character units, ~7 pixels per character)
+COLUMN_WIDTH_PIXELS = 100
+COLUMN_WIDTH_CHARS = COLUMN_WIDTH_PIXELS / 7
 
 
 def extract_plate_from_sampleid(sampleid):
@@ -132,12 +182,13 @@ def filter_samples(samples_df, nhm_plates, family_expert_map):
     return filtered
 
 
-def prepare_output_dataframe(group_df):
+def prepare_output_dataframe(group_df, missing_columns):
     """
     Prepare dataframe for output with proper sorting and numbering.
     
     Args:
         group_df (pd.DataFrame): Dataframe for single expert/family combination
+        missing_columns (list): List of columns missing from input data
         
     Returns:
         pd.DataFrame: Organized dataframe ready for Excel output
@@ -145,20 +196,11 @@ def prepare_output_dataframe(group_df):
     # Sort by BIN alphabetically, then by processid within each BIN
     sorted_df = group_df.sort_values(['bin_uri', 'processid']).copy()
     
-    # Add sort_order column (1-based index for entire file)
-    sorted_df.insert(0, 'sort_order', range(1, len(sorted_df) + 1))
+    # Add sort_order column
+    sorted_df['sort_order'] = range(1, len(sorted_df) + 1)
     
     # Add representative_specimen number within each BIN
     sorted_df['representative_specimen'] = sorted_df.groupby('bin_uri').cumcount() + 1
-    
-    # Find position of bin_uri column to insert representative_specimen next to it
-    bin_uri_pos = sorted_df.columns.get_loc('bin_uri')
-    
-    # Reorder columns to put representative_specimen next to bin_uri
-    cols = sorted_df.columns.tolist()
-    cols.remove('representative_specimen')
-    cols.insert(bin_uri_pos + 1, 'representative_specimen')
-    sorted_df = sorted_df[cols]
     
     # Add empty columns for lab processing
     sorted_df['fluidx_tube'] = ''
@@ -166,7 +208,24 @@ def prepare_output_dataframe(group_df):
     sorted_df['fluidx_box_position'] = ''
     sorted_df['processing_notes'] = ''
     
-    # Remove temporary expert column used for grouping
+    # Add empty morph columns
+    sorted_df['morph_family'] = ''
+    sorted_df['morph_genus'] = ''
+    sorted_df['morph_species'] = ''
+    sorted_df['morph_subspecies'] = ''
+    sorted_df['morph_notes'] = ''
+    
+    # Add any missing columns from input as empty
+    for col in missing_columns:
+        if col not in sorted_df.columns:
+            sorted_df[col] = ''
+    
+    # Select and reorder columns according to REQUIRED_COLUMNS
+    # Only include columns that exist in the dataframe
+    output_columns = [col for col in REQUIRED_COLUMNS if col in sorted_df.columns]
+    sorted_df = sorted_df[output_columns]
+    
+    # Remove temporary expert column if it exists
     if 'expert' in sorted_df.columns:
         sorted_df = sorted_df.drop(columns=['expert'])
     
@@ -186,7 +245,56 @@ def sanitize_filename(text):
     return text.replace(' ', '_')
 
 
-def write_output_files(filtered_df, output_dir, log_file):
+def apply_excel_formatting(filepath):
+    """
+    Apply column widths, autofilter, freeze panes, and cell protection to Excel file.
+    
+    Args:
+        filepath (Path): Path to Excel file to format
+    """
+    wb = load_workbook(filepath)
+    ws = wb.active
+    
+    # Set column widths for all columns (100px = ~14.29 characters)
+    for col_num in range(1, len(REQUIRED_COLUMNS) + 1):
+        col_letter = get_column_letter(col_num)
+        ws.column_dimensions[col_letter].width = COLUMN_WIDTH_CHARS
+    
+    # Add autofilter to header row
+    last_column_letter = get_column_letter(len(REQUIRED_COLUMNS))
+    ws.auto_filter.ref = f'A1:{last_column_letter}{ws.max_row}'
+    
+    # Freeze top row (header row)
+    ws.freeze_panes = 'A2'
+    
+    # Get column indices for unlocked columns
+    unlocked_indices = [REQUIRED_COLUMNS.index(col) + 1 for col in UNLOCKED_COLUMNS if col in REQUIRED_COLUMNS]
+    
+    # Apply cell protection
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=len(REQUIRED_COLUMNS)):
+        for cell_idx, cell in enumerate(row, start=1):
+            if cell_idx in unlocked_indices:
+                # Unlock editable columns
+                cell.protection = Protection(locked=False)
+            else:
+                # Lock all other columns
+                cell.protection = Protection(locked=True)
+    
+    # Lock header row
+    for cell in ws[1]:
+        cell.protection = Protection(locked=True)
+    
+    # Protect the sheet with password
+    ws.protection.sheet = True
+    ws.protection.password = SHEET_PASSWORD
+    
+    # Save the workbook
+    wb.save(filepath)
+    wb.close()
+
+
+
+def write_output_files(filtered_df, output_dir, log_file, missing_columns):
     """
     Write Excel files for each expert/family combination and create log.
     
@@ -194,6 +302,7 @@ def write_output_files(filtered_df, output_dir, log_file):
         filtered_df (pd.DataFrame): Filtered samples with expert assignments
         output_dir (Path): Output directory
         log_file (Path): Path to log file
+        missing_columns (list): List of columns missing from input data
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -209,7 +318,7 @@ def write_output_files(filtered_df, output_dir, log_file):
             continue
         
         # Prepare output dataframe
-        output_df = prepare_output_dataframe(group)
+        output_df = prepare_output_dataframe(group, missing_columns)
         
         # Generate filename
         expert_name = sanitize_filename(expert)
@@ -220,6 +329,9 @@ def write_output_files(filtered_df, output_dir, log_file):
         # Write to Excel
         output_df.to_excel(filepath, index=False, engine='openpyxl')
         
+        # Apply formatting and protection
+        apply_excel_formatting(filepath)
+        
         # Track stats
         stats[(expert, family)] = len(output_df)
         files_created.append(filename)
@@ -228,6 +340,13 @@ def write_output_files(filtered_df, output_dir, log_file):
     with open(log_file, 'w') as f:
         f.write("Representative Specimen Selection Summary\n")
         f.write("=" * 60 + "\n\n")
+        
+        # Report missing columns if any
+        if missing_columns:
+            f.write("WARNING: Missing columns in input data:\n")
+            for col in missing_columns:
+                f.write(f"  - {col} (created as empty column)\n")
+            f.write("\n")
         
         f.write(f"Total files created: {len(files_created)}\n\n")
         
@@ -317,6 +436,17 @@ def main():
     samples_df = pd.read_csv(args.samples, sep='\t')
     print(f"  Loaded {len(samples_df)} samples")
     
+    # Check for missing columns (excluding those we create)
+    created_columns = ['sort_order', 'representative_specimen', 'fluidx_box_barcode', 
+                      'fluidx_box_position', 'fluidx_tube', 'processing_notes',
+                      'morph_family', 'morph_genus', 'morph_species', 
+                      'morph_subspecies', 'morph_notes']
+    expected_input_columns = [col for col in REQUIRED_COLUMNS if col not in created_columns]
+    missing_columns = [col for col in expected_input_columns if col not in samples_df.columns]
+    
+    if missing_columns:
+        print(f"  Warning: {len(missing_columns)} columns missing from input (will be created as empty)")
+    
     print("\nFiltering samples...")
     
     # Filter samples
@@ -335,7 +465,7 @@ def main():
     log_file = args.output / log_filename
     
     # Write output files and log
-    write_output_files(filtered_df, args.output, log_file)
+    write_output_files(filtered_df, args.output, log_file, missing_columns)
 
 
 if __name__ == '__main__':
