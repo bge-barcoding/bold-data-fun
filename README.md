@@ -23,7 +23,10 @@ Creates hierarchical sunburst charts from CSV data with support for 3-5 levels o
 Identifies BOLD records from specified projects that meet filtering criteria related to species gaps, BAGS grades, and UK representation in BINs. Processes species lists with synonyms and generates detailed results with family-level summaries.
 
 #### [Gap Analysis](scripts/gap-analysis)
-Performs comprehensive gap analysis for DNA barcode library curation by comparing target species lists against BOLD (Barcode of Life Data) database records and BAGS (Barcode, Audit & Grade System) assessments output from [BOLDetective](https://github.com/bge-barcoding/bold-library-curation).
+Performs comprehensive gap analysis for DNA barcode library curation by comparing target species lists against BOLD (Barcode of Life Data) database records and BAGS (Barcode, Audit & Grade System) assessments output from [BOLDetective](https://github.com/bge-barcoding/bold-library-curation). Features traffic light status system (Green/Amber/Red/Blue/Black), synonym handling with BIN concordance checking, intelligent categorisation of species records, BAGS grade E analysis for BIN-sharing species, and taxonomy inference for missing species from congeneric records.
+
+#### [Sample Picker](scripts/sample-picker)
+Filters BOLD bioscan analysis data to select representative specimens for expert analysis and genomic processing. Organizes specimens by taxonomic family and expert assignment, filtering for plates currently at NHM and gap analysis targets. Generates protected XLSX workbooks with editable fields for lab processing workflow (FluidX tube tracking, morphological verification notes) while maintaining data integrity for specimen identifiers and taxonomic information.
 
 #### [GBIF Processor](scripts/gbif-processor)
 Automates taxonomic name decisions when reconciling specimen names against GBIF's backbone taxonomy. Uses a configurable rules matrix to determine whether to use original names (e.g., for type specimens) or GBIF-accepted names based on match status, type, and name differences. Generates separate outputs for taxonomy requests and ENA/NCBI verification.
