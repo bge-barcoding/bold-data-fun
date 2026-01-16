@@ -12,6 +12,7 @@ This tool uses the output of the [BOLDetective](https://github.com/bge-barcoding
 
 ## Features
 
+- **Traffic light status system** — Assigns actionable status (Green/Amber/Red/Blue/Black) to each species
 - **Species coverage analysis** — Identifies which target species have BOLD records
 - **Synonym handling** — Tracks valid names and their synonyms, detecting when only synonyms have records
 - **BIN concordance checking** — Flags taxonomic concerns when synonyms appear in different BINs
@@ -103,12 +104,13 @@ Tab-separated BAGS assessment output containing:
 
 ### Gap Analysis TSV
 
-The script produces a comprehensive TSV file with 24 columns organised into logical groups:
+The script produces a comprehensive TSV file with 25 columns organised into logical groups:
 
 #### Core Identification
 | Column | Description |
 |--------|-------------|
 | `species` | Species name in binomial format |
+| `species_status` | Traffic light status: Green, Amber, Red, Blue, Black, or N/A |
 | `synonyms` | Pipe-separated list of synonyms from input |
 
 #### Classification
@@ -171,6 +173,53 @@ The `species_category` column classifies each entry:
 | **Extra BIN** | Not on input list, but shares a BIN with an input species |
 | **Extra species** | Not on input list and doesn't share BINs with input species |
 
+## Species Status (Traffic Light System)
+
+The `species_status` column provides an actionable assessment for each target species, using a traffic light system to prioritise curation efforts. Status is only assigned to Valid species from the input list; all other categories receive N/A.
+
+| Status | Colour | Meaning | Criteria |
+|--------|--------|---------|----------|
+| **Green** | 🟢 | Clean, no issues | BAGS ≠ E, valid name present, no BIN conflicts |
+| **Amber** | 🟡 | Known issues, needs work | BAGS E with known synonyms, partial BIN overlap, or both valid and synonym names present |
+| **Red** | 🔴 | Needs investigation | BAGS E with unknown sharers, or synonyms in completely different BINs |
+| **Blue** | 🔵 | Nomenclatural fix needed | Only synonym has records, valid name absent from BOLD |
+| **Black** | ⚫ | No coverage | No records for valid name or any synonyms |
+| **N/A** | — | Not assessed | Extra species, Extra BIN, or Synonym category |
+
+### Priority Order
+
+When multiple conditions apply, the worst status takes precedence:
+
+**Black → Red → Amber → Blue → Green**
+
+### Detailed Criteria
+
+#### Green (Clean)
+- BAGS grade is not E (or empty)
+- Valid name has records
+- No BIN conflicts with synonyms
+
+#### Amber (Known Issues)
+Any of:
+- BAGS grade E, but all sharers are known synonyms from input list
+- Synonyms have partial BIN overlap with valid species
+- Both valid name and synonym(s) have records in BOLD
+
+#### Red (Needs Investigation)
+Any of:
+- BAGS grade E with unknown species sharing the BIN
+- BAGS grade E with mix of known synonyms and unknown species
+- Synonyms are in completely different BINs than valid species (taxonomic concern)
+
+#### Blue (Nomenclatural Fix)
+- Only synonym name(s) have records
+- Valid name is absent from BOLD
+- Not triggered if Red conditions also apply
+
+#### Black (No Coverage)
+- Zero records for valid species name
+- Zero records for all synonyms
+
 ## Key Analyses
 
 ### Synonym-BIN Concordance
@@ -200,11 +249,13 @@ For target species with zero BOLD records, taxonomy is inferred from congeneric 
 ## Example Output
 
 ```
-species                 species_category    synonym_BIN_status    name_representation    BAGS_grade
-Gammarus pulex          Valid              Same BIN              Valid + synonym(s)     C
-Limnephilus rhombicus   Valid              N/A                   Valid name only        B
-Chaetogaster fluminis   Synonym            Different BINs        Synonym only ⚠️        E
-Gammarus roeseli        Extra BIN          N/A                   N/A                    D
+species                 species_status    species_category    synonym_BIN_status    name_representation    BAGS_grade
+Gammarus pulex          Amber             Valid               Same BIN              Valid + synonym(s)     C
+Limnephilus rhombicus   Green             Valid               N/A                   Valid name only        B
+Baetis rhodani          Red               Valid               Different BINs        Valid + synonym(s)     E
+Ephemera danica         Blue              Valid               N/A                   Synonym only           C
+Hydropsyche pellucidula Black             Valid               N/A                   No records             
+Gammarus roeseli        N/A               Extra BIN           N/A                   N/A                    D
 ```
 
 ## Troubleshooting
