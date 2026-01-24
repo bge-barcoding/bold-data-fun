@@ -382,7 +382,7 @@ def calculate_total_recursive(data):
     return sum(calculate_total_recursive(v) for v in data.values())
 
 def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='sunburst_chart.png', 
-                         title='Data Sunburst Analysis', figsize=(18, 18), auto_formats=True,
+                         title=None, figsize=(18, 18), auto_formats=True,
                          color_inherit_level=1, color_mode='variations', count_unique=False,
                          line_width=0.5, threshold_percent=0.0, other_label="Other", 
                          label_threshold=5.0, top_n=None, threshold_mode='local',
@@ -657,8 +657,9 @@ def create_sunburst_chart(hierarchy, total_samples, active_levels, output_file='
     ax.set_aspect('equal')
     ax.axis('off')
     
-    # Set title
-    plt.title(title, fontsize=18, weight='bold', pad=20, color='black')    
+    # Set title only if provided
+    if title:
+        plt.title(title, fontsize=18, weight='bold', pad=20, color='black')    
     # Save the figure in specified format(s)
     plt.tight_layout()
     
@@ -755,7 +756,7 @@ def main():
                        help='Output filename with extension (default: sunburst_chart.png)\n' +
                             'Supported formats: PNG, JPG, PDF, SVG, EPS, TIFF\n' +
                             'SVG and PDF are automatically generated for editing')
-    parser.add_argument('--title', default='Data Sunburst Analysis', help='Chart title')
+    parser.add_argument('--title', default=None, help='Chart title (default: no title)')
     parser.add_argument('--width', type=int, default=18, help='Figure width in inches (default: 18)')
     parser.add_argument('--height', type=int, default=18, help='Figure height in inches (default: 18)')
     parser.add_argument('--no-auto-formats', action='store_true', 

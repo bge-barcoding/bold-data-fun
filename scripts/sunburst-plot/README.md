@@ -99,7 +99,7 @@ python sunburst_script.py data.csv --top-n 10 --label-style full --line-width 0.
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--output` | `sunburst_chart.png` | Output filename with extension |
-| `--title` | `Data Sunburst Analysis` | Chart title |
+| `--title` | `None` | Chart title (default: no title displayed) |
 | `--width` | `18` | Figure width in inches |
 | `--height` | `18` | Figure height in inches |
 | `--no-auto-formats` | `False` (flag) | Skip automatic generation of SVG and PDF versions |
@@ -210,7 +210,7 @@ python sunburst_script.py data.csv --output chart.pdf
 # PNG only, skip auto SVG/PDF
 python sunburst_script.py data.csv --output chart.png --no-auto-formats
 
-# Custom title
+# Custom title (no title shown by default)
 python sunburst_script.py data.csv --title "Biodiversity Analysis 2024"
 ```
 

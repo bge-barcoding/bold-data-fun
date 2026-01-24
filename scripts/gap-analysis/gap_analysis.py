@@ -3,7 +3,9 @@
 Gap analysis for BOLD library curation workflow.
 
 This script performs a gap analysis by comparing:
-1. Input species list (from config FILTER_TAXA_LIST)
+1. Input species list (from config FILTER_TAXA_LIST or --species-list)
+   - Supports simple CSV format: species;synonym1;synonym2
+   - Supports TSV format with headers (auto-detected by .tsv extension)
 2. Result output data (result_output.tsv)
 3. BAGS assessment data (assessed_BAGS.tsv)
 
@@ -14,6 +16,7 @@ The script identifies:
 - Record counts per taxonid
 
 Output: A comprehensive TSV file with gap analysis results.
+When using TSV input, all input columns are preserved in the output.
 """
 
 import argparse
@@ -709,9 +712,9 @@ def get_all_input_species_bins(
     return all_bins
 
 
-def parse_species_list(species_file: Path) -> Tuple[Dict[str, List[str]], Set[str], Dict[str, str]]:
+def parse_species_list_simple(species_file: Path) -> Tuple[Dict[str, List[str]], Set[str], Dict[str, str], Dict[str, Dict], List[str]]:
     """
-    Parse species list with optional synonyms.
+    Parse simple species list format (one species per line, semicolon-separated synonyms).
     
     Format: valid_species OR valid_species;synonym1;synonym2;etc
     
@@ -720,11 +723,15 @@ def parse_species_list(species_file: Path) -> Tuple[Dict[str, List[str]], Set[st
         - Dictionary mapping valid species (lowercase) to list of synonyms
         - Set of all valid species names (original case)
         - Dictionary mapping synonym (lowercase) to valid species (lowercase)
+        - Dictionary mapping valid species (lowercase) to input row data (empty for simple format)
+        - List of input column names (empty for simple format)
     """
-    logging.info(f"Loading species list from {species_file}")
+    logging.info(f"Loading simple species list from {species_file}")
     species_synonyms = {}  # lowercase valid species -> list of synonyms
     valid_species_set = set()  # original case valid species
     synonym_to_valid = {}  # lowercase synonym -> lowercase valid species
+    species_input_data = {}  # No additional data for simple format
+    input_columns = []  # No columns for simple format
     
     try:
         with open(species_file, 'r', encoding='utf-8') as f:
@@ -751,20 +758,143 @@ def parse_species_list(species_file: Path) -> Tuple[Dict[str, List[str]], Set[st
                 
                 species_synonyms[key] = synonyms
                 valid_species_set.add(valid_species)
+                species_input_data[key] = {}  # Empty dict for simple format
                 
                 # Build synonym to valid species mapping
                 for syn in synonyms:
                     synonym_to_valid[syn.lower()] = key
         
-        logging.info(f"Loaded {len(species_synonyms)} species from input list")
+        logging.info(f"Loaded {len(species_synonyms)} species from simple input list")
         total_synonyms = sum(len(syns) for syns in species_synonyms.values())
         logging.info(f"Total synonyms: {total_synonyms}")
         
-        return species_synonyms, valid_species_set, synonym_to_valid
+        return species_synonyms, valid_species_set, synonym_to_valid, species_input_data, input_columns
         
     except Exception as e:
         logging.error(f"Failed to load species list: {e}")
         sys.exit(1)
+
+
+def parse_species_list_tsv(species_file: Path) -> Tuple[Dict[str, List[str]], Set[str], Dict[str, str], Dict[str, Dict], List[str]]:
+    """
+    Parse TSV species list format with headers.
+    
+    Expected columns:
+    - 'species': Full binomial species name (required)
+    - 'synonyms': Semicolon-separated synonyms (optional, can be empty)
+    - Any additional columns are preserved in output
+    
+    Returns:
+        Tuple of:
+        - Dictionary mapping valid species (lowercase) to list of synonyms
+        - Set of all valid species names (original case)
+        - Dictionary mapping synonym (lowercase) to valid species (lowercase)
+        - Dictionary mapping valid species (lowercase) to full input row data
+        - List of input column names (preserves order)
+    """
+    logging.info(f"Loading TSV species list from {species_file}")
+    species_synonyms = {}  # lowercase valid species -> list of synonyms
+    valid_species_set = set()  # original case valid species
+    synonym_to_valid = {}  # lowercase synonym -> lowercase valid species
+    species_input_data = {}  # lowercase valid species -> dict of all input columns
+    input_columns = []  # Ordered list of input column names
+    
+    # Try UTF-8 first, fall back to Latin-1 if decoding fails
+    for encoding in ['utf-8', 'latin-1']:
+        try:
+            with open(species_file, 'r', encoding=encoding) as f:
+                reader = csv.DictReader(f, delimiter='\t')
+                
+                # Capture column names from header (preserves order)
+                input_columns = list(reader.fieldnames) if reader.fieldnames else []
+                
+                if 'species' not in input_columns:
+                    logging.error("TSV file must have a 'species' column")
+                    sys.exit(1)
+                
+                logging.info(f"Found {len(input_columns)} columns in TSV: {', '.join(input_columns)}")
+                
+                for row_num, row in enumerate(reader, 2):  # Start at 2 (header is row 1)
+                    valid_species = row.get('species', '').strip()
+                    
+                    if not valid_species:
+                        logging.warning(f"Row {row_num}: Empty species name, skipping")
+                        continue
+                    
+                    # Store with lowercase key for case-insensitive matching
+                    key = valid_species.lower()
+                    
+                    # Get synonyms from 'synonyms' column (semicolon-separated)
+                    synonyms_field = row.get('synonyms', '').strip()
+                    synonyms = [s.strip() for s in synonyms_field.split(';') if s.strip()]
+                    
+                    if key in species_synonyms:
+                        logging.warning(f"Duplicate species found: {valid_species}")
+                    
+                    species_synonyms[key] = synonyms
+                    valid_species_set.add(valid_species)
+                    
+                    # Store ALL input columns for this species
+                    species_input_data[key] = {col: row.get(col, '').strip() for col in input_columns}
+                    
+                    # Build synonym to valid species mapping
+                    for syn in synonyms:
+                        synonym_to_valid[syn.lower()] = key
+            
+            # If we successfully read the file, log success and return
+            if encoding == 'latin-1':
+                logging.info(f"Successfully read file using {encoding} encoding")
+            logging.info(f"Loaded {len(species_synonyms)} species from TSV input list")
+            total_synonyms = sum(len(syns) for syns in species_synonyms.values())
+            logging.info(f"Total synonyms: {total_synonyms}")
+            
+            return species_synonyms, valid_species_set, synonym_to_valid, species_input_data, input_columns
+            
+        except UnicodeDecodeError as e:
+            if encoding == 'utf-8':
+                logging.warning(f"UTF-8 decoding failed, trying Latin-1 encoding")
+                # Reset for retry
+                species_synonyms = {}
+                valid_species_set = set()
+                synonym_to_valid = {}
+                species_input_data = {}
+                input_columns = []
+                continue
+            else:
+                logging.error(f"Failed to load TSV with Latin-1 encoding: {e}")
+                sys.exit(1)
+        except Exception as e:
+            logging.error(f"Failed to load TSV species list: {e}")
+            sys.exit(1)
+    
+    # Should never reach here
+    logging.error("Failed to load TSV species list with any supported encoding")
+    sys.exit(1)
+
+
+def parse_species_list(species_file: Path) -> Tuple[Dict[str, List[str]], Set[str], Dict[str, str], Dict[str, Dict], List[str]]:
+    """
+    Parse species list, auto-detecting format based on file extension.
+    
+    - .tsv files: Parsed as TSV with headers
+    - Other files (.csv, .txt, no extension): Parsed as simple format
+    
+    Returns:
+        Tuple of:
+        - Dictionary mapping valid species (lowercase) to list of synonyms
+        - Set of all valid species names (original case)
+        - Dictionary mapping synonym (lowercase) to valid species (lowercase)
+        - Dictionary mapping valid species (lowercase) to input row data
+        - List of input column names
+    """
+    suffix = species_file.suffix.lower()
+    
+    if suffix == '.tsv':
+        logging.info("Detected TSV format based on file extension")
+        return parse_species_list_tsv(species_file)
+    else:
+        logging.info("Using simple format (not .tsv extension)")
+        return parse_species_list_simple(species_file)
 
 
 def load_assessed_bags(bags_file: Path) -> Dict[str, Dict]:
@@ -984,12 +1114,17 @@ def perform_gap_analysis(
     species_to_bins: Dict,
     bin_to_species: Dict,
     all_species_in_results: Set,
-    genus_to_taxonomy: Dict
-) -> List[Dict]:
+    genus_to_taxonomy: Dict,
+    species_input_data: Dict[str, Dict],
+    input_columns: List[str]
+) -> Tuple[List[Dict], List[str]]:
     """
     Perform gap analysis by merging all data sources.
     
-    Returns list of dictionaries, one per unique species-taxonid combination.
+    Returns:
+        Tuple of:
+        - List of dictionaries, one per unique species-taxonid combination
+        - List of output column names (input columns first, then analysis columns)
     """
     logging.info("Performing gap analysis...")
     
@@ -1004,6 +1139,9 @@ def perform_gap_analysis(
     for species_lower, synonyms in species_synonyms.items():
         processed_species.add(species_lower)
         
+        # Get input data for this species (if TSV format was used)
+        input_data = species_input_data.get(species_lower, {})
+        
         # Find matching species in result output
         if species_lower in species_taxonid_map:
             # Species found in results
@@ -1015,24 +1153,24 @@ def perform_gap_analysis(
                 bin_field = bags_info.get('BIN', '')
                 taxonid_bins = set([b.strip() for b in bin_field.split('|') if b.strip()]) if bin_field else set()
                 
-                # NEW: Analyze synonym-BIN distribution
+                # Analyze synonym-BIN distribution
                 syn_analysis = analyze_synonym_bin_distribution(
                     species_lower, synonyms, species_to_bins
                 )
                 
-                # NEW: Check name representation
+                # Check name representation
                 name_rep = check_name_representation(
                     species_lower, synonyms, all_species_in_results,
                     species_taxonid_map, taxonid_record_count
                 )
                 
-                # NEW: Determine species category
+                # Determine species category
                 category_info = determine_species_category(
                     species_lower, taxonid_bins, valid_species_set,
                     synonym_to_valid, all_input_species_bins, bin_to_species
                 )
                 
-                # NEW: Analyze BAGS E sharers (only if BAGS grade E)
+                # Analyze BAGS E sharers (only if BAGS grade E)
                 if bags_info.get('BAGS', '') == 'E':
                     sharer_analysis = analyze_sharer_names(
                         bags_info.get('sharers', ''),
@@ -1043,9 +1181,21 @@ def perform_gap_analysis(
                 else:
                     sharer_analysis = {'sharer_status': '', 'sharer_type': ''}
                 
-                result = {
-                    # Core identification
-                    'species': format_species_name(species_lower),
+                # Build result dictionary - start with input columns if available
+                result = {}
+                
+                # Add all input columns first (preserves order)
+                for col in input_columns:
+                    result[col] = input_data.get(col, '')
+                
+                # Override species with formatted version (in case of case differences)
+                result['species'] = format_species_name(species_lower)
+                
+                # Override synonyms column with pipe-separated format for consistency
+                result['synonyms'] = '|'.join(synonyms) if synonyms else ''
+                
+                # Add analysis columns
+                result.update({
                     'species_status': determine_species_status(
                         category_info['category'],
                         taxonid_record_count.get(taxonid, 0),
@@ -1055,49 +1205,38 @@ def perform_gap_analysis(
                         syn_analysis['status'],
                         name_rep['representation']
                     ),
-                    'synonyms': '|'.join(synonyms) if synonyms else '',
-                    
-                    # Classification (NEW: species_category replaces gaplist_species)
                     'species_category': category_info['category'],
                     'associated_input_species': category_info['associated_input_species'],
-                    
-                    # Record counts
                     'total_record_count': taxonid_record_count.get(taxonid, 0),
-                    
-                    # BAGS assessment
                     'BAGS_grade': bags_info.get('BAGS', ''),
-                    
-                    # BIN info
                     'BIN_uri': bin_field,
                     'sharers': bags_info.get('sharers', ''),
-                    
-                    # Synonym-BIN analysis (NEW)
                     'synonym_BIN_status': syn_analysis['status'],
                     'synonym_BIN_details': syn_analysis['details'],
-                    
-                    # Name representation (NEW)
                     'name_representation': name_rep['representation'],
                     'names_with_records': name_rep['names_with_records'],
                     'synonym_record_count': name_rep['synonym_record_count'],
                     'synonym_only_flag': name_rep['synonym_only_flag'],
-                    
-                    # BAGS E analysis (NEW)
                     'BAGS_E_sharer_status': sharer_analysis['sharer_status'],
                     'BAGS_E_sharer_type': sharer_analysis['sharer_type'],
-                    
-                    # Taxonomy
-                    'kingdom': taxonomy.get('kingdom', ''),
-                    'phylum': taxonomy.get('phylum', ''),
-                    'class': taxonomy.get('class', ''),
-                    'order': taxonomy.get('order', ''),
-                    'family': taxonomy.get('family', ''),
-                    'genus': taxonomy.get('genus', ''),
-                    'taxonomy_source': 'Direct'  # NEW
-                }
+                    'taxonomy_source': 'Input' if input_data else 'Direct'
+                })
+                
+                # Only add BOLD taxonomy columns if no input taxonomy was provided
+                if not input_columns or 'kingdom' not in input_columns:
+                    result.update({
+                        'kingdom': taxonomy.get('kingdom', ''),
+                        'phylum': taxonomy.get('phylum', ''),
+                        'class': taxonomy.get('class', ''),
+                        'order': taxonomy.get('order', ''),
+                        'family': taxonomy.get('family', ''),
+                        'genus': taxonomy.get('genus', ''),
+                    })
+                
                 results.append(result)
         else:
             # Species in input list but NOT in results (0 records)
-            # Infer taxonomy from genus
+            # Infer taxonomy from genus (only if no input taxonomy)
             inferred = infer_taxonomy_from_genus(species_lower, genus_to_taxonomy)
             
             # For species with 0 records, analyze what we can
@@ -1110,9 +1249,21 @@ def perform_gap_analysis(
                 species_taxonid_map, taxonid_record_count
             )
             
-            result = {
-                # Core identification
-                'species': format_species_name(species_lower),
+            # Build result dictionary - start with input columns if available
+            result = {}
+            
+            # Add all input columns first (preserves order)
+            for col in input_columns:
+                result[col] = input_data.get(col, '')
+            
+            # Override species with formatted version
+            result['species'] = format_species_name(species_lower)
+            
+            # Override synonyms column with pipe-separated format
+            result['synonyms'] = '|'.join(synonyms) if synonyms else ''
+            
+            # Add analysis columns
+            result.update({
                 'species_status': determine_species_status(
                     'Valid',
                     0,
@@ -1122,45 +1273,38 @@ def perform_gap_analysis(
                     syn_analysis['status'],
                     name_rep['representation']
                 ),
-                'synonyms': '|'.join(synonyms) if synonyms else '',
-                
-                # Classification
                 'species_category': 'Valid',
                 'associated_input_species': '',
-                
-                # Record counts (all zeros)
                 'total_record_count': 0,
-                
-                # BAGS assessment (empty)
                 'BAGS_grade': '',
-                
-                # BIN info (empty)
                 'BIN_uri': '',
                 'sharers': '',
-                
-                # Synonym-BIN analysis
                 'synonym_BIN_status': syn_analysis['status'],
                 'synonym_BIN_details': syn_analysis['details'],
-                
-                # Name representation
                 'name_representation': name_rep['representation'],
                 'names_with_records': name_rep['names_with_records'],
                 'synonym_record_count': name_rep['synonym_record_count'],
                 'synonym_only_flag': name_rep['synonym_only_flag'],
-                
-                # BAGS E analysis (empty - no BAGS grade)
                 'BAGS_E_sharer_status': '',
                 'BAGS_E_sharer_type': '',
-                
-                # Taxonomy (inferred)
-                'kingdom': inferred['taxonomy'].get('kingdom', ''),
-                'phylum': inferred['taxonomy'].get('phylum', ''),
-                'class': inferred['taxonomy'].get('class', ''),
-                'order': inferred['taxonomy'].get('order', ''),
-                'family': inferred['taxonomy'].get('family', ''),
-                'genus': inferred['taxonomy'].get('genus', ''),
-                'taxonomy_source': inferred['source']
-            }
+            })
+            
+            # Handle taxonomy source
+            if input_columns and 'kingdom' in input_columns:
+                # Use input taxonomy (already in result from input_data)
+                result['taxonomy_source'] = 'Input'
+            else:
+                # Use inferred taxonomy
+                result.update({
+                    'kingdom': inferred['taxonomy'].get('kingdom', ''),
+                    'phylum': inferred['taxonomy'].get('phylum', ''),
+                    'class': inferred['taxonomy'].get('class', ''),
+                    'order': inferred['taxonomy'].get('order', ''),
+                    'family': inferred['taxonomy'].get('family', ''),
+                    'genus': inferred['taxonomy'].get('genus', ''),
+                    'taxonomy_source': inferred['source']
+                })
+            
             results.append(result)
     
     # Process species found in results but NOT in input list (Extra species or synonyms)
@@ -1191,9 +1335,19 @@ def perform_gap_analysis(
                 else:
                     sharer_analysis = {'sharer_status': '', 'sharer_type': ''}
                 
-                result = {
-                    # Core identification
-                    'species': format_species_name(species_lower),
+                # Build result dictionary
+                result = {}
+                
+                # For extra species, initialize all input columns as empty
+                for col in input_columns:
+                    result[col] = ''
+                
+                # Set species name
+                result['species'] = format_species_name(species_lower)
+                result['synonyms'] = ''  # Extra species don't have synonyms listed
+                
+                # Add analysis columns
+                result.update({
                     'species_status': determine_species_status(
                         category_info['category'],
                         taxonid_record_count.get(taxonid, 0),
@@ -1203,50 +1357,39 @@ def perform_gap_analysis(
                         'N/A',
                         'N/A'
                     ),
-                    'synonyms': '',  # Extra species don't have synonyms listed
-                    
-                    # Classification
                     'species_category': category_info['category'],
                     'associated_input_species': category_info['associated_input_species'],
-                    
-                    # Record counts
                     'total_record_count': taxonid_record_count.get(taxonid, 0),
-                    
-                    # BAGS assessment
                     'BAGS_grade': bags_info.get('BAGS', ''),
-                    
-                    # BIN info
                     'BIN_uri': bin_field,
                     'sharers': bags_info.get('sharers', ''),
-                    
-                    # Synonym-BIN analysis (N/A for extra species)
                     'synonym_BIN_status': 'N/A',
                     'synonym_BIN_details': '',
-                    
-                    # Name representation (N/A for extra species)
                     'name_representation': 'N/A',
                     'names_with_records': format_species_name(species_lower),
                     'synonym_record_count': 0,
                     'synonym_only_flag': '',
-                    
-                    # BAGS E analysis
                     'BAGS_E_sharer_status': sharer_analysis['sharer_status'],
                     'BAGS_E_sharer_type': sharer_analysis['sharer_type'],
-                    
-                    # Taxonomy (direct from data)
-                    'kingdom': taxonomy.get('kingdom', ''),
-                    'phylum': taxonomy.get('phylum', ''),
-                    'class': taxonomy.get('class', ''),
-                    'order': taxonomy.get('order', ''),
-                    'family': taxonomy.get('family', ''),
-                    'genus': taxonomy.get('genus', ''),
                     'taxonomy_source': 'Direct'
-                }
+                })
+                
+                # Add BOLD taxonomy for extra species (if not already in input columns)
+                if not input_columns or 'kingdom' not in input_columns:
+                    result.update({
+                        'kingdom': taxonomy.get('kingdom', ''),
+                        'phylum': taxonomy.get('phylum', ''),
+                        'class': taxonomy.get('class', ''),
+                        'order': taxonomy.get('order', ''),
+                        'family': taxonomy.get('family', ''),
+                        'genus': taxonomy.get('genus', ''),
+                    })
+                
                 results.append(result)
     
     logging.info(f"Gap analysis complete: {len(results)} total entries")
     
-    # Summary statistics (using new species_category column)
+    # Summary statistics (using species_category column)
     valid_species_count = len([r for r in results if r['species_category'] == 'Valid'])
     synonym_species_count = len([r for r in results if r['species_category'] == 'Synonym'])
     extra_species_count = len([r for r in results if r['species_category'] == 'Extra species'])
@@ -1273,60 +1416,53 @@ def perform_gap_analysis(
     logging.info(f"    - Blue (nomenclatural fix): {blue_count}")
     logging.info(f"    - Black (no coverage): {black_count}")
     
-    return results
+    # Build output column order: input columns first, then analysis columns
+    analysis_columns = [
+        'species_status',
+        'species_category',
+        'associated_input_species',
+        'total_record_count',
+        'BAGS_grade',
+        'BIN_uri',
+        'sharers',
+        'synonym_BIN_status',
+        'synonym_BIN_details',
+        'name_representation',
+        'names_with_records',
+        'synonym_record_count',
+        'synonym_only_flag',
+        'BAGS_E_sharer_status',
+        'BAGS_E_sharer_type',
+        'taxonomy_source'
+    ]
+    
+    # Add BOLD taxonomy columns if not using TSV input with taxonomy
+    if not input_columns or 'kingdom' not in input_columns:
+        analysis_columns.extend(['kingdom', 'phylum', 'class', 'order', 'family', 'genus'])
+    
+    # Build final column order
+    if input_columns:
+        # Input columns first (excluding species and synonyms which are already there)
+        output_columns = list(input_columns)
+        # Add analysis columns that aren't already in input
+        for col in analysis_columns:
+            if col not in output_columns:
+                output_columns.append(col)
+    else:
+        # Simple format: use standard output columns
+        output_columns = ['species', 'synonyms'] + analysis_columns
+    
+    return results, output_columns
 
 
-def write_gap_analysis(results: List[Dict], output_file: Path) -> None:
+def write_gap_analysis(results: List[Dict], output_file: Path, fieldnames: List[str]) -> None:
     """Write gap analysis results to TSV file."""
     logging.info(f"Writing gap analysis to {output_file}")
-    
-    fieldnames = [
-        # Core identification
-        'species',
-        'species_status',
-        'synonyms',
-        
-        # Classification
-        'species_category',              # NEW (replaces gaplist_species)
-        'associated_input_species',      # NEW
-        
-        # Record counts
-        'total_record_count',            # EXISTING
-        
-        # BAGS assessment
-        'BAGS_grade',                    # EXISTING
-        
-        # BIN info
-        'BIN_uri',                       # EXISTING
-        'sharers',                       # EXISTING
-        
-        # Synonym-BIN analysis
-        'synonym_BIN_status',            # NEW
-        'synonym_BIN_details',           # NEW
-        
-        # Name representation
-        'name_representation',           # NEW
-        'names_with_records',            # NEW
-        'synonym_record_count',          # NEW
-        'synonym_only_flag',             # NEW
-        
-        # BAGS E analysis
-        'BAGS_E_sharer_status',          # NEW
-        'BAGS_E_sharer_type',            # NEW
-        
-        # Taxonomy
-        'kingdom',                       # EXISTING
-        'phylum',                        # EXISTING
-        'class',                         # EXISTING
-        'order',                         # EXISTING
-        'family',                        # EXISTING
-        'genus',                         # EXISTING
-        'taxonomy_source'                # NEW
-    ]
+    logging.info(f"Output columns: {len(fieldnames)}")
     
     try:
         with open(output_file, 'w', encoding='utf-8', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter='\t')
+            writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter='\t', extrasaction='ignore')
             writer.writeheader()
             writer.writerows(results)
         
@@ -1350,12 +1486,25 @@ Examples:
       --assessed-bags results/assessed_BAGS.tsv \\
       --output results/gap_analysis.tsv
   
-  # Override species list via CLI
-  python gap_analysis.py --config config/config.yml \\
-      --species-list custom_species.csv \\
+  # Using simple species list (CSV format)
+  python gap_analysis.py --species-list species.csv \\
       --result-output results/result_output.tsv \\
       --assessed-bags results/assessed_BAGS.tsv \\
       --output results/gap_analysis.tsv
+  
+  # Using TSV species list with additional columns
+  python gap_analysis.py --species-list species.tsv \\
+      --result-output results/result_output.tsv \\
+      --assessed-bags results/assessed_BAGS.tsv \\
+      --output results/gap_analysis.tsv
+
+Input file formats:
+  - Simple format (.csv, .txt): One species per line, synonyms semicolon-separated
+    Example: Gammarus pulex;Gammarus fossarum
+  
+  - TSV format (.tsv): Tab-separated with headers
+    Required columns: species, synonyms (semicolon-separated)
+    All additional columns are preserved in output
         """
     )
     
@@ -1368,7 +1517,7 @@ Examples:
     parser.add_argument(
         '--species-list',
         type=Path,
-        help='Path to species list CSV (overrides config FILTER_TAXA_LIST)'
+        help='Path to species list file (CSV or TSV, overrides config FILTER_TAXA_LIST)'
     )
     
     parser.add_argument(
@@ -1445,14 +1594,14 @@ Examples:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     
     # Load all data
-    species_synonyms, valid_species_set, synonym_to_valid = parse_species_list(species_list_path)
+    species_synonyms, valid_species_set, synonym_to_valid, species_input_data, input_columns = parse_species_list(species_list_path)
     bags_data = load_assessed_bags(args.assessed_bags)
     (species_taxonid_map, taxonid_record_count,
      species_to_bins, bin_to_species,
      all_species_in_results, genus_to_taxonomy) = load_result_output(args.result_output)
     
     # Perform gap analysis
-    results = perform_gap_analysis(
+    results, output_columns = perform_gap_analysis(
         species_synonyms,
         valid_species_set,
         synonym_to_valid,
@@ -1462,11 +1611,13 @@ Examples:
         species_to_bins,
         bin_to_species,
         all_species_in_results,
-        genus_to_taxonomy
+        genus_to_taxonomy,
+        species_input_data,
+        input_columns
     )
     
     # Write output
-    write_gap_analysis(results, args.output)
+    write_gap_analysis(results, args.output, output_columns)
     
     logging.info("=" * 80)
     logging.info("Gap analysis complete!")

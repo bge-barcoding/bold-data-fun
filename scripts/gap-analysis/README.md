@@ -6,7 +6,7 @@ A Python script that performs comprehensive gap analysis for DNA barcode library
 
 This tool uses the output of the [BOLDetective](https://github.com/bge-barcoding/bold-library-curation) pipeline for analysing animal barcode data quality in BOLD. It identifies coverage gaps, taxonomic inconsistencies, and data quality issues by cross-referencing:
 
-1. **Input species list** — Target species with optional synonyms
+1. **Input species list** — Target species with optional synonyms (simple CSV or TSV format)
 2. **Result output** — BOLD database records (`result_output.tsv`)
 3. **BAGS assessment** — BIN grading data (`assessed_BAGS.tsv`)
 
@@ -20,6 +20,7 @@ This tool uses the output of the [BOLDetective](https://github.com/bge-barcoding
 - **BAGS grade E analysis** — Analyses BIN-sharing species for synonym status and Linnean name validity
 - **Taxonomy inference** — Infers higher taxonomy for missing species from congeneric records
 - **Record count aggregation** — Provides counts at taxonid, species, and BIN levels
+- **TSV input with pass-through columns** — Preserves all columns from TSV input files in output
 
 ## Installation
 
@@ -48,11 +49,21 @@ python gap_analysis.py \
     --output results/gap_analysis.tsv
 ```
 
-### Using Custom Species List
+### Using Simple Species List (CSV format)
 
 ```bash
 python gap_analysis.py \
     --species-list custom_species.csv \
+    --result-output results/result_output.tsv \
+    --assessed-bags results/assessed_BAGS.tsv \
+    --output results/gap_analysis.tsv
+```
+
+### Using TSV Species List with Additional Columns
+
+```bash
+python gap_analysis.py \
+    --species-list uksi_valid_species_output.tsv \
     --result-output results/result_output.tsv \
     --assessed-bags results/assessed_BAGS.tsv \
     --output results/gap_analysis.tsv
@@ -63,7 +74,7 @@ python gap_analysis.py \
 | Option | Required | Description |
 |--------|----------|-------------|
 | `--config` | No* | Path to config.yml (reads `FILTER_TAXA_LIST`) |
-| `--species-list` | No* | Path to species list CSV (overrides config) |
+| `--species-list` | No* | Path to species list file (CSV or TSV, overrides config) |
 | `--result-output` | Yes | Path to `result_output.tsv` from BOLD |
 | `--assessed-bags` | Yes | Path to `assessed_BAGS.tsv` from BAGS pipeline |
 | `--output` | Yes | Output path for gap analysis TSV |
@@ -75,6 +86,10 @@ python gap_analysis.py \
 
 ### Species List Format
 
+The script supports two input formats, automatically detected by file extension:
+
+#### Simple Format (`.csv`, `.txt`, or other extensions)
+
 Plain text file with one species per line. Synonyms are semicolon-separated:
 
 ```
@@ -83,13 +98,34 @@ Gammarus fossarum;Gammarus caparti
 Chaetogaster diastrophus;Chaetogaster fluminis
 ```
 
+#### TSV Format (`.tsv` extension)
+
+Tab-separated file with headers. Required columns:
+- `species` — Full binomial species name
+- `synonyms` — Semicolon-separated list of synonyms (can be empty)
+
+All additional columns are preserved in the output. Example:
+
+```
+organism_key	taxon_version_key	kingdom	phylum_division	class	order	family	genus	species	synonyms	authority
+NBNORG0000117638	NHMSYS0021164177	Animalia	Acanthocephala	Palaeacanthocephala	Echinorhynchida	Pomphorhynchidae	Pomphorhynchus	Pomphorhynchus laevis		Müller, 1776
+NBNORG0000017093	NBNSYS0000022376	Animalia	Annelida	Clitellata	Arhynchobdellida	Erpobdellidae	Trocheta	Trocheta subviridis	Trochaeta subviridis	Dutrochet, 1817
+NBNORG0000049319	NHMSYS0000068873	Animalia	Annelida	Clitellata	Rhynchobdellida	Glossiphoniidae	Glossiphonia	Glossiphonia paludosa	Bactracobdella paludosa;Batracobdella paludosa	(Carena, 1824)
+```
+
+When using TSV input:
+- All input columns appear first in the output (preserving order)
+- Analysis columns are appended after input columns
+- Input taxonomy (e.g., `kingdom`, `phylum_division`) is used as the authoritative source
+- Empty synonym fields are handled correctly (species with no synonyms)
+
 ### Result Output (`result_output.tsv`)
 
 Tab-separated file from BOLD containing at minimum:
 - `species` — Species name
 - `subspecies` — Subspecies (optional)
 - `taxonid` — BOLD taxon identifier
-- `BIN` — Barcode Index Number(s), pipe-separated if multiple
+- `bin_uri` — Barcode Index Number(s), pipe-separated if multiple
 - Taxonomy columns: `kingdom`, `phylum`, `class`, `order`, `family`, `genus`
 
 ### Assessed BAGS (`assessed_BAGS.tsv`)
@@ -104,63 +140,33 @@ Tab-separated BAGS assessment output containing:
 
 ### Gap Analysis TSV
 
-The script produces a comprehensive TSV file with 25 columns organised into logical groups:
+The script produces a comprehensive TSV file. When using TSV input, all input columns appear first, followed by analysis columns.
 
-#### Core Identification
+#### Analysis Columns
+
 | Column | Description |
 |--------|-------------|
-| `species` | Species name in binomial format |
 | `species_status` | Traffic light status: Green, Amber, Red, Blue, Black, or N/A |
-| `synonyms` | Pipe-separated list of synonyms from input |
-
-#### Classification
-| Column | Description |
-|--------|-------------|
 | `species_category` | Classification: Valid, Synonym, Extra species, or Extra BIN |
 | `associated_input_species` | For "Extra BIN" category: input species sharing this BIN |
-
-#### Record Counts
-| Column | Description |
-|--------|-------------|
 | `total_record_count` | Number of BOLD records for this taxonid |
-
-#### BAGS Assessment
-| Column | Description |
-|--------|-------------|
 | `BAGS_grade` | BAGS grade (A-E) for this taxonid |
 | `BIN_uri` | BIN URI(s) for this taxonid |
 | `sharers` | Species sharing the BIN (BAGS grade E only) |
-
-#### Synonym-BIN Analysis
-| Column | Description |
-|--------|-------------|
 | `synonym_BIN_status` | Same BIN, Different BINs, Partial overlap, No data, or N/A |
 | `synonym_BIN_details` | Detailed BIN information per synonym |
-
-#### Name Representation
-| Column | Description |
-|--------|-------------|
 | `name_representation` | Valid name only, Valid + synonym(s), Synonym only, No records, or N/A |
 | `names_with_records` | Comma-separated list of names found in BOLD |
 | `synonym_record_count` | Total records across all synonyms found in BOLD (0 if none) |
 | `synonym_only_flag` | ⚠️ warning if only synonym has records |
-
-#### BAGS Grade E Analysis
-| Column | Description |
-|--------|-------------|
 | `BAGS_E_sharer_status` | All known synonyms, Mix, No known synonyms, or N/A |
 | `BAGS_E_sharer_type` | All Linnean or Contains non-Linnean |
+| `taxonomy_source` | Input (from TSV), Direct (from BOLD), Inferred from genus, or No genus data |
 
-#### Taxonomy
-| Column | Description |
-|--------|-------------|
-| `kingdom` | Taxonomic kingdom |
-| `phylum` | Taxonomic phylum |
-| `class` | Taxonomic class |
-| `order` | Taxonomic order |
-| `family` | Taxonomic family |
-| `genus` | Taxonomic genus |
-| `taxonomy_source` | Direct, Inferred from genus, Inconsistent, or No genus data |
+#### Taxonomy Handling
+
+- **TSV input with taxonomy columns**: Input taxonomy is used as authoritative source. `taxonomy_source` = "Input"
+- **Simple input or TSV without taxonomy**: BOLD taxonomy is used for species with records, or inferred from congenerics for species without records
 
 ## Species Categories Explained
 
@@ -240,13 +246,15 @@ Identifies curation issues where the valid name is absent from BOLD:
 
 ### Taxonomy Inference
 
-For target species with zero BOLD records, taxonomy is inferred from congeneric species:
+For target species with zero BOLD records (and no input taxonomy):
 
 - Searches for other species of the same genus in BOLD
 - Uses consensus taxonomy if all congenerics agree
 - Flags inconsistencies if genus has conflicting taxonomies
 
 ## Example Output
+
+### With Simple Input
 
 ```
 species                 species_status    species_category    synonym_BIN_status    name_representation    BAGS_grade
@@ -256,6 +264,13 @@ Baetis rhodani          Red               Valid               Different BINs    
 Ephemera danica         Blue              Valid               N/A                   Synonym only           C
 Hydropsyche pellucidula Black             Valid               N/A                   No records             
 Gammarus roeseli        N/A               Extra BIN           N/A                   N/A                    D
+```
+
+### With TSV Input (columns preserved)
+
+```
+organism_key       kingdom    phylum_division    class       species              synonyms                 species_status    species_category    ...
+NBNORG0000049319   Animalia   Annelida           Clitellata  Glossiphonia paludosa  Bactracobdella paludosa  Green             Valid               ...
 ```
 
 ## Troubleshooting
@@ -273,4 +288,10 @@ For very large TSV files, the script automatically adjusts CSV field size limits
 Species on your input list with zero BOLD records will still appear in the output with:
 - `total_record_count`: 0
 - `BAGS_grade`: empty
-- `taxonomy_source`: "Inferred from genus" (if congenerics exist)
+- `taxonomy_source`: "Input" (if TSV with taxonomy) or "Inferred from genus" (if congenerics exist)
+
+### File Format Detection
+
+The script auto-detects format based on file extension:
+- `.tsv` → TSV format with headers
+- All other extensions (`.csv`, `.txt`, etc.) → Simple format (one species per line)
