@@ -1,3 +1,4 @@
 scripts/csv-mapper/bge_museum_data_europe.csv
 /scripts/gap-analysis/__pycache__
 scripts/gap-analysis/results/lrRNA_gap_analysis.tsv
+scripts/gap-analysis/results/lrRNA_gap_analysis_test.tsv
