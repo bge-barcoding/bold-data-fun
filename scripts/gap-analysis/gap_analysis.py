@@ -902,6 +902,8 @@ def load_assessed_bags(bags_file: Path) -> Dict[str, Dict]:
     Load BAGS assessment data.
     
     Handles both UTF-8 and Latin-1 encoded files automatically.
+    Supports both 'taxonid' (BOLD format) and 'taxid' (MIDORI format) column names.
+    Supports both 'BIN' (BOLD format) and 'OTU_ID' (MIDORI format) for identifiers.
     
     Returns dictionary: taxonid -> {BAGS: grade, BIN: uri, sharers: list}
     """
@@ -914,14 +916,21 @@ def load_assessed_bags(bags_file: Path) -> Dict[str, Dict]:
             with open(bags_file, 'r', encoding=encoding) as f:
                 reader = csv.DictReader(f, delimiter='\t')
                 
+                # Detect column names from header
+                fieldnames = reader.fieldnames or []
+                taxon_col = 'taxonid' if 'taxonid' in fieldnames else 'taxid'
+                bin_col = 'BIN' if 'BIN' in fieldnames else 'OTU_ID'
+                
+                logging.info(f"BAGS file using taxon column: '{taxon_col}', identifier column: '{bin_col}'")
+                
                 for row in reader:
-                    taxonid = row.get('taxonid', '').strip()
+                    taxonid = row.get(taxon_col, '').strip()
                     if not taxonid:
                         continue
                     
                     bags_data[taxonid] = {
                         'BAGS': row.get('BAGS', '').strip(),
-                        'BIN': row.get('BIN', '').strip(),
+                        'BIN': row.get(bin_col, '').strip(),
                         'sharers': row.get('sharers', '').strip()
                     }
             
@@ -955,13 +964,15 @@ def load_result_output(result_file: Path) -> Tuple[Dict, Dict, Dict, Dict, Set, 
     Includes subspecies in the full species name (e.g., "Genus species subspecies")
     
     Handles both UTF-8 and Latin-1 encoded files automatically.
+    Supports both 'taxonid' (BOLD format) and 'taxid' (MIDORI format) column names.
+    Supports both 'bin_uri' (BOLD format) and 'OTU_ID' (MIDORI format) for identifiers.
     
     Returns:
         Tuple of:
         - species_taxonid_map: dict mapping species (lowercase) -> list of (taxonid, taxonomy_dict)
         - taxonid_record_count: dict mapping taxonid -> count of records
-        - species_to_bins: dict mapping species (lowercase) -> set of BIN_uris
-        - bin_to_species: dict mapping BIN_uri -> set of species (lowercase)
+        - species_to_bins: dict mapping species (lowercase) -> set of BIN_uris/OTU_IDs
+        - bin_to_species: dict mapping BIN_uri/OTU_ID -> set of species (lowercase)
         - all_species_in_results: set of all species names (lowercase) found in results
         - genus_to_taxonomy: dict mapping genus -> list of taxonomy dicts
     """
@@ -981,11 +992,18 @@ def load_result_output(result_file: Path) -> Tuple[Dict, Dict, Dict, Dict, Set, 
             with open(result_file, 'r', encoding=encoding) as f:
                 reader = csv.DictReader(f, delimiter='\t')
                 
+                # Detect column names from header
+                fieldnames = reader.fieldnames or []
+                taxon_col = 'taxonid' if 'taxonid' in fieldnames else 'taxid'
+                bin_col = 'bin_uri' if 'bin_uri' in fieldnames else 'OTU_ID'
+                
+                logging.info(f"Result file using taxon column: '{taxon_col}', identifier column: '{bin_col}'")
+                
                 for row in reader:
                     species_full = row.get('species', '').strip()
                     subspecies = row.get('subspecies', '').strip()
-                    taxonid = row.get('taxonid', '').strip()
-                    bin_field = row.get('bin_uri', '').strip()
+                    taxonid = row.get(taxon_col, '').strip()
+                    bin_field = row.get(bin_col, '').strip()
                     
                     if not species_full or not taxonid:
                         continue
