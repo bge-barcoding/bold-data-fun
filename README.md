@@ -30,3 +30,6 @@ Filters BOLD bioscan analysis data to select representative specimens for expert
 
 #### [GBIF Processor](scripts/gbif-processor)
 Automates taxonomic name decisions when reconciling specimen names against GBIF's backbone taxonomy. Uses a configurable rules matrix to determine whether to use original names (e.g., for type specimens) or GBIF-accepted names based on match status, type, and name differences. Generates separate outputs for taxonomy requests and ENA/NCBI verification.
+
+#### [BOLD curation reformatter](scripts/bold-curation-reformatter)
+Takes the output of the manual curation tool log files and maps the updates against a BOLD data package to combine them into a report for sharing with CBG staff so records can be corrected at source.
